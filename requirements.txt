@@ -10,6 +10,13 @@ requests>=2.31
 rank_bm25>=0.2.2
 
 # Add further phase-scoped dependencies here as each phase needs them,
-# not preemptively (workflow.md §2 scope discipline). Anticipated next:
-# langgraph (Phase 5), nemoguardrails (only if D-013's revisit condition
-# is met).
+# not preemptively (workflow.md §2 scope discipline).
+
+# Phase 5 -- agentic path orchestration. Pure Python control-flow
+# library, no heavy compute dependency (unlike torch-based options
+# rejected in D-013/D-019), so no conflict with trd.md §1's footprint
+# constraint.
+langgraph>=1.0
+
+# Anticipated next: nemoguardrails (only if D-013's revisit condition is
+# met).

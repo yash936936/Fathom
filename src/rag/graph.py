@@ -1,0 +1,139 @@
+"""
+rag/graph.py — the agentic path, wired with LangGraph.
+
+Per docs/code_logic.md §4. Node order: PLANNER -> RETRIEVAL (fan-out) ->
+RERANK_FILTER -> CURATOR -> SUFFICIENCY_CHECK -> (loop back to RETRIEVAL
+if insufficient and under MAX_RETRIES, else) -> SYNTHESIS.
+
+Phase 6's VERIFICATION and OUTPUT_GUARDRAIL nodes (answerability,
+citation_verifier, self_consistency) are NOT wired in yet -- this graph
+ends at synthesis, same grounding guarantees as the fast path
+(core/guardrail.py's output_rail is applied by the caller, main.py, not
+inside the graph itself, so both paths share one place that check runs).
+"""
+
+from __future__ import annotations
+
+import sys
+
+import tools  # noqa: F401 -- registers built-in tools, see tools/__init__.py
+from langgraph.graph import END, StateGraph
+
+from core.llm_backend import FathomModel
+from core.state import ResearchState
+from rag.curator import curate
+from rag.planner import plan_node
+from rag.reranker import rerank
+from rag.retriever_hybrid import retrieve
+from rag.sufficiency import should_retry, sufficiency_node
+from rag.synthesis import generate
+
+
+def build_graph(model: FathomModel, top_k: int = 8):
+    """Returns a compiled LangGraph graph. `model` is closed over by the
+    node functions below rather than threaded through ResearchState,
+    since it's infrastructure (the loaded model), not query-specific
+    data -- keeping it out of the TypedDict state matches how
+    core/llm_backend.py's singleton is used everywhere else in the app.
+    """
+
+    def planner_node(state: ResearchState) -> ResearchState:
+        print("  Planning sub-questions...", file=sys.stderr)
+        return plan_node(state, model)
+
+    def retrieval_node(state: ResearchState) -> ResearchState:
+        print(f"  Retrieving evidence (attempt {state.get('retry_count', 0) + 1})...", file=sys.stderr)
+        all_chunks = []
+        for sub_query in state.get("sub_queries", [state["original_query"]]):
+            all_chunks.extend(retrieve(sub_query))
+        state["retrieved_chunks"] = all_chunks
+        return state
+
+    def rerank_filter_node(state: ResearchState) -> ResearchState:
+        state["retrieved_chunks"] = rerank(
+            state.get("retrieved_chunks", []),
+            top_k=top_k,
+            requires_recency=state.get("requires_recency", False),
+        )
+        return state
+
+    def curator_node(state: ResearchState) -> ResearchState:
+        state["retrieved_chunks"] = curate(
+            state.get("retrieved_chunks", []), state["original_query"]
+        )
+        return state
+
+    def sufficiency_check_node(state: ResearchState) -> ResearchState:
+        print("  Checking whether evidence is sufficient...", file=sys.stderr)
+        return sufficiency_node(state, model)
+
+    def retry_increment_node(state: ResearchState) -> ResearchState:
+        # Separate tiny node (rather than folding into sufficiency_check)
+        # so the retry-count bump is visible as its own graph step --
+        # easier to reason about / log than a side effect buried in the
+        # sufficiency judgment node.
+        state["retry_count"] = state.get("retry_count", 0) + 1
+        return state
+
+    def synthesis_node(state: ResearchState) -> ResearchState:
+        print("  Generating final answer...", file=sys.stderr)
+        chunks = state.get("retrieved_chunks", [])
+        answer, citations = generate(state["original_query"], chunks, model)
+
+        gap = state.get("sufficiency_gap")
+        if gap and not state.get("sufficiency", True):
+            # Retry cap was exhausted with evidence still judged
+            # insufficient -- surface that explicitly per D-010's
+            # loop-engineering pattern, don't silently present a
+            # best-effort answer as if it were complete.
+            answer += (
+                f"\n\n[Note: evidence on this topic was incomplete after "
+                f"{state.get('retry_count', 0)} search attempts. "
+                f"Specifically missing: {gap}]"
+            )
+
+        state["answer"] = answer
+        state["citations"] = citations
+        return state
+
+    def route_after_sufficiency(state: ResearchState) -> str:
+        return "retry" if should_retry(state) else "synthesize"
+
+    graph = StateGraph(ResearchState)
+    graph.add_node("planner", planner_node)
+    graph.add_node("retrieval", retrieval_node)
+    graph.add_node("rerank_filter", rerank_filter_node)
+    graph.add_node("curator", curator_node)
+    graph.add_node("sufficiency_check", sufficiency_check_node)
+    graph.add_node("retry_increment", retry_increment_node)
+    graph.add_node("synthesis", synthesis_node)
+
+    graph.set_entry_point("planner")
+    graph.add_edge("planner", "retrieval")
+    graph.add_edge("retrieval", "rerank_filter")
+    graph.add_edge("rerank_filter", "curator")
+    graph.add_edge("curator", "sufficiency_check")
+    graph.add_conditional_edges(
+        "sufficiency_check",
+        route_after_sufficiency,
+        {"retry": "retry_increment", "synthesize": "synthesis"},
+    )
+    graph.add_edge("retry_increment", "retrieval")
+    graph.add_edge("synthesis", END)
+
+    return graph.compile()
+
+
+def run_agentic(query: str, model: FathomModel, top_k: int = 8) -> ResearchState:
+    """Entry point for main.py -- builds and runs the graph for one
+    query. Building the graph per-call (not cached) is cheap; it's
+    control-flow wiring, not the expensive part (the LLM calls inside
+    the nodes are).
+    """
+    from core.state import new_state
+
+    compiled = build_graph(model, top_k=top_k)
+    initial_state = new_state(query)
+    initial_state["path"] = "agentic"
+    final_state = compiled.invoke(initial_state)
+    return final_state

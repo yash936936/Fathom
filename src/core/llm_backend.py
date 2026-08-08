@@ -122,6 +122,7 @@ class FathomModel:
         max_tokens: int = 512,
         temperature: float = 0.2,
         stop: Iterable[str] | None = None,
+        on_token: Any = None,
     ) -> str:
         """Chat-style call using the model's embedded chat template
         (Qwen3-Instruct ships one; llama-cpp-python applies it
@@ -129,14 +130,38 @@ class FathomModel:
         every other module (domain_gate, planner, synthesis, etc.)
         should use -- not `complete()` -- since it's what the model was
         instruction-tuned against.
+
+        `on_token`, if given, is called with each token's text as it's
+        generated (streaming), so callers (main.py) can show live
+        progress instead of blocking silently for however long
+        generation takes. See decisions.md D-021 -- added after a real
+        15-minute silent run looked indistinguishable from a hang.
+        Without on_token, behaves exactly as before (blocks, returns the
+        full string).
         """
-        result: dict[str, Any] = self._llama.create_chat_completion(
+        if on_token is None:
+            result: dict[str, Any] = self._llama.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=list(stop) if stop else None,
+            )
+            return result["choices"][0]["message"]["content"]
+
+        chunks: list[str] = []
+        stream = self._llama.create_chat_completion(
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
             stop=list(stop) if stop else None,
+            stream=True,
         )
-        return result["choices"][0]["message"]["content"]
+        for piece in stream:
+            delta = piece["choices"][0]["delta"].get("content")
+            if delta:
+                chunks.append(delta)
+                on_token(delta)
+        return "".join(chunks)
 
     def complete(
         self,

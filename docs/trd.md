@@ -52,9 +52,18 @@
   not a request to the model.
 
 ## 6. Non-functional requirements
-- **Latency:** fast path target <5s; agentic path target <20s on reference
-  CPU hardware (exact numbers pinned once Phase 4 benchmarking completes —
-  see `phases.md`).
+- **Latency:** REVISED per decisions.md D-022, based on real Phase 4
+  measurement (375.7s for one fast-path query on reference CPU hardware —
+  not an anomaly, see D-022's correction of the earlier D-015/D-016
+  hypothesis). Original targets (<5s fast path / <20s agentic) are
+  superseded, not achievable on the stated CPU-only/<6GB hardware profile
+  with the current model. Fathom is scoped as a research tool where a
+  multi-minute wait for a thorough, cited answer is acceptable — not an
+  interactive chat tool. No hard latency ceiling is enforced in v1;
+  `main.py`'s streaming output (D-021) exists specifically so a slow
+  answer is visibly progressing rather than indistinguishable from a
+  hang. Revisit only if a future eval shows latency is actually driving
+  users away, with real usage data, not a pre-set number.
 - **Reliability:** no silent hallucination fallback — retrieval failure must
   produce an explicit refusal, never a parametric-memory guess presented as
   grounded.

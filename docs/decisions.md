@@ -401,5 +401,148 @@ against live endpoints is UNVERIFIED in this sandbox (same limitation as
 B-001) — needs testing on a real machine before Phase 3 is marked
 complete.
 
+### D-020 — Phase 3 fully verified on real hardware; router is heuristic, not an LLM call
+**Phase:** 3 completion + 4
+**Phase 3 closure:** user ran `test_phase3_manual.py` (11/11) and
+`verify_phase3_network.py` on real hardware with live network access.
+All three network tools confirmed working against real endpoints
+(DuckDuckGo HTML, arXiv Atom API, Google News RSS all returned correctly
+parsed, dated results for a live query). `retriever_hybrid.retrieve()` +
+`reranker.rerank()` end-to-end also confirmed: recency-weighted ranking
+correctly favored same-week arXiv/news results over an older item and
+over undated web results, in the exact stable order the scoring logic
+predicts. Phase 3 is genuinely complete, not just code-complete.
+**Phase 4 decision:** `core/router.py`'s complexity classification is a
+pure heuristic (regex/word-count signals), not an LLM call. Given the
+still-open latency problem (D-015/D-017/D-018), adding a third LLM call
+per query (domain_gate, then a routing call, then synthesis) would make
+routing itself a bottleneck for no accuracy benefit a cheap heuristic
+can't already provide — comparison words, multi-part phrasing, question
+count, and query length are reasonable, explainable proxies for "needs
+decomposition."
+**Latency now concrete, not abstract:** Phase 4 wires domain_gate +
+retrieve + rerank + synthesis into one real end-to-end call chain. At
+current measured speeds (~1.7 tok/s post D-017), a single fast-path query
+now realistically costs 60-90+ seconds (domain-gate call + synthesis
+call, each generating tens of tokens). This was flagged to the user
+directly before writing Phase 4's code, not discovered silently after.
+**Files touched:** `src/core/router.py`, `src/rag/synthesis.py`,
+`src/main.py` (full rewrite from Phase 1's raw passthrough to the wired
+fast-path pipeline), `test_phase4_manual.py`.
+**Verification:** 17/17 logic checks passing in `test_phase4_manual.py`
+(router heuristics, citation extraction including the "cited a
+nonexistent source_id gets flagged immediately at parse time, no LLM
+call needed" case, and the zero-retrieved-chunks explicit-refusal path
+that never calls the model at all). Full end-to-end `main.py` run with
+the real model is NOT yet verified — needs the user to run it, same
+pattern as every prior phase.
+
+### D-021 — Added token streaming after a real 15-minute silent run looked indistinguishable from a hang
+**Phase:** 4
+**Finding:** User's first real end-to-end `main.py` run produced zero
+output for 15+ minutes before being interrupted. Root cause: `chat()`
+was non-streaming (`create_chat_completion` without `stream=True`
+blocks until the entire response is generated), and Phase 4's default
+`max_tokens=512` combined with ~1.7 tok/s generation (post-D-017) means
+a full-length answer could take 5+ minutes of raw generation alone, on
+top of the domain-gate call and prefill time for a prompt now containing
+several retrieved sources. The run may well have still been progressing
+normally — there was simply no way to tell from the user's side.
+**Decision:** Added optional token-by-token streaming to
+`core/llm_backend.py`'s `chat()` (via an `on_token` callback,
+`stream=True` under the hood) and threaded it through
+`rag/synthesis.py`'s `generate()`. `main.py` now prints stage progress
+("Checking request...", "Searching sources...", "Generating answer from
+N sources...") and streams the answer live token-by-token as it's
+generated.
+**Scope of the fix:** this addresses the UX/legibility problem (is it
+working or hung), NOT the underlying latency problem (D-015/D-017/D-018
+remain open). A slow answer that visibly streams is still a slow answer.
+Not conflating the two.
+**Files touched:** `src/core/llm_backend.py`, `src/rag/synthesis.py`,
+`src/main.py`.
+**Verification:** `test_phase4_manual.py` re-run after the refactor —
+still 17/17, confirming the non-streaming code paths (citation
+extraction, zero-chunk refusal, router heuristics) are unaffected by
+`on_token` defaulting to `None`. The actual streaming behavior itself
+is NOT verified in this sandbox (needs the real model) — user to
+re-run `main.py` with a small `--max-tokens` first for a fast
+confirmatory pass, per this turn's guidance.
+
+### D-022 — Phase 4 confirmed working end-to-end; latency target reframed, not abandoned
+**Phase:** 4 completion + 5
+**Phase 4 closure:** real end-to-end run on user's hardware succeeded
+functionally: retrieval pulled real live sources, synthesis correctly
+hedged rather than fabricating ("no specific mention of breakthroughs
+beyond these points"), and both citations in the answer resolved to
+real, listed sources — the core grounding behavior the citation/
+guardrail design exists to produce is confirmed working, not just
+theoretically sound. Measured latency: 375.7s for one fast-path query
+(domain gate + retrieval + synthesis), ~75x over `trd.md`'s original <5s
+target.
+**Correction to earlier framing:** D-015/D-016 assumed the slowness was
+an anomaly with a findable root cause, based on best-case benchmark
+throughput for this model class. Having ruled out missing SIMD
+(disproven, D-016), disk I/O via mmap (partially fixed, D-017), and
+threading (confirmed correct), the remaining gap looks more like this
+laptop's real sustained CPU-inference ceiling than a bug still waiting
+to be found. Stated plainly rather than continuing to search for a fix
+that may not exist.
+**Decision:** User chose explicitly (asked directly, not another silent
+override) to accept current latency and continue, framing Fathom as a
+research tool where a multi-minute wait for a thorough, cited answer is
+an acceptable tradeoff — not a chat tool needing sub-5-second turnaround.
+**trd.md updated accordingly:** the <5s/<20s latency targets in `trd.md`
+§6 are revised, not deleted — see the corresponding edit there. This is
+a real scope decision, not scope creep silently absorbed.
+**Carried forward into Phase 5, explicitly:** the agentic path adds a
+planner call, up to 3 retry-loop iterations, and the same synthesis
+call — each paying a similar per-call cost to what's now measured. A
+complex query could realistically take considerably longer than 375s.
+This is accepted, not hidden, per the user's explicit choice above.
+**Files touched:** `docs/trd.md` §6 (NFRs updated), `docs/phases.md`
+(Phase 4 exit criteria reinterpreted under the revised target).
+
+### D-023 — Phase 5 built: LangGraph agentic path, curator implemented, no LLM calls added where heuristics suffice
+**Phase:** 5
+**Decision:** Added `langgraph>=1.0` as a real dependency — pure
+control-flow library, no heavy compute backend, doesn't conflict with
+`trd.md` §1 the way torch-based options did (D-013, D-019). Built
+`rag/planner.py`, `rag/curator.py` (finally implementing the node
+documented back in D-010 but never coded), `rag/sufficiency.py`, and
+`rag/graph.py` wiring them into the exact node graph specified in
+`code_logic.md` §4.
+**Given D-022's accepted-but-real latency cost per LLM call:**
+`rag/curator.py` is deliberately a heuristic filter (content length,
+alpha-character ratio, query-word overlap), not an LLM call — every
+avoidable model call matters more now that each one is confirmed
+expensive (375s baseline from D-022). `MAX_RETRIES` set to 2 (low end of
+`code_logic.md`'s "2-3" range) for the same reason — each retry is
+another full retrieval + sufficiency-check round trip.
+**UX consistency with D-021:** added stage-progress printing inside
+`rag/graph.py`'s node closures (planner, each retrieval attempt,
+sufficiency check, synthesis) — the agentic path chains more LLM calls
+than the fast path, so silent waiting would be an even worse version of
+the problem D-021 fixed. Full token-by-token streaming (like the fast
+path's synthesis) is NOT wired into the agentic path's synthesis node
+yet — stage markers only, not live token output. Noted as a gap, not
+silently left unstated.
+**Files touched:** `src/rag/planner.py`, `src/rag/curator.py`,
+`src/rag/sufficiency.py`, `src/rag/graph.py`, `src/main.py` (complex
+path now calls `run_agentic()` instead of the Phase 4 placeholder
+message), `requirements.txt`.
+**Verification:** this phase has the strongest verification of any so
+far — 13/13 in `test_phase5_manual.py` (planner/curator/sufficiency unit
+logic) AND 9/9 in `test_phase5_graph.py`, which runs the actual compiled
+LangGraph state machine end-to-end with a scripted stub model across
+three scenarios: immediate success (3 calls), one retry then success (4
+calls, retry_count confirmed incremented exactly once), and retry-cap
+exhaustion (confirmed `retry_count` stops exactly at `MAX_RETRIES` and
+the evidence gap is surfaced in the final answer rather than dropped).
+This is real orchestration-framework verification, not just isolated
+function testing — but still stub-based; the real model + real network
+combination for the full agentic path is NOT yet verified, same pattern
+as every prior phase.
+
 ---
 **Return to `/context.md` for next steps.**

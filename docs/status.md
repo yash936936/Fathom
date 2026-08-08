@@ -7,33 +7,88 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 3 — Tools & hybrid retrieval
-- **Phase status:** Code written for all six files
-  (`tools/registry.py`, `web_search.py`, `arxiv_feed.py`, `news_feed.py`,
-  `vector_store.py`, `rag/retriever_hybrid.py`, `rag/reranker.py`).
-  11/11 logic checks passing for everything testable without network
-  access (registry dispatch, BM25 curated store, dedupe, reranker
-  scoring/recency/top_k). `web_search`/`arxiv_feed`/`news_feed`'s actual
-  HTTP calls against live endpoints are UNVERIFIED — sandbox can't reach
-  duckduckgo.com/export.arxiv.org/news.google.com. Needs testing on a
-  real machine before Phase 3 is marked complete.
-- **Latency status (carried over, not resolved):** `use_mmap=False` gave
-  a confirmed ~2x generation speedup (42.3s → 23.6s for the same reply)
-  but generation still runs well below `trd.md`'s target. Proceeding to
-  Phase 3 anyway was an explicit user override (D-018) — this risk is
-  still open, not closed, and will compound if not addressed before
-  Phase 5's agentic loop (which makes multiple LLM calls per query).
-- **Next phase:** Phase 4 — Adaptive routing + fast path. NOT started —
-  user asked for this directly but was redirected to Phase 3 first per
-  `phases.md`'s dependency order (Phase 4's fast path needs Phase 3's
-  retrieval to exist).
-- **Blockers:** (1) real-machine verification of the three network-tool
-  files, (2) the still-open latency gap from Phase 1/2, carried forward
-  rather than resolved.
+- **Active phase:** Phase 5 — Agentic path (LangGraph)
+- **Phase status:** Phase 4 is now FULLY CONFIRMED — real end-to-end run
+  succeeded (375.7s, correct grounded answer with resolving citations,
+  see decisions.md D-022). Latency target REVISED (not abandoned) in
+  `trd.md` §6 per D-022 — Fathom is scoped as a research tool tolerant of
+  multi-minute answers, not a chat tool. Phase 5 code written:
+  `rag/planner.py`, `rag/curator.py`, `rag/sufficiency.py`, `rag/graph.py`
+  (LangGraph state machine), `main.py` wired to call `run_agentic()` for
+  complex queries. 13/13 unit-logic checks + 9/9 full-graph-execution
+  checks passing (`test_phase5_manual.py`, `test_phase5_graph.py`) —
+  the graph checks are the strongest verification yet, since they run
+  the actual compiled LangGraph state machine including a genuinely
+  cycling, cap-respecting retry loop, not just isolated function logic.
+- **Latency (accepted per D-022, compounding as expected in Phase 5):**
+  agentic path chains planner + up to 3 retrieval/sufficiency round
+  trips + synthesis — several times the 375.7s fast-path baseline for a
+  complex query. This is the expected, accepted consequence of D-022's
+  choice, not a new surprise.
+- **UX gap noted, not yet fixed:** agentic path has stage-progress
+  printing (D-023) but not full token streaming during synthesis like
+  the fast path has (D-021) — flagged, not silently left out.
+- **Next phase:** Phase 6 — Hallucination/verification layer. Should not
+  start until Phase 5's real-model + real-network agentic run is
+  confirmed on real hardware.
+- **Blockers:** real-machine verification of `run_agentic()` end-to-end
+  (a real complex/multi-part query, with the real model and real
+  retrieval) has not been run yet — only stub-based graph execution is
+  confirmed so far.
 
 ---
 
 ## Log (newest first)
+
+### Entry 008
+**Phase:** 4 closure + 5
+**Action taken:** Confirmed Phase 4 fully working end-to-end on real
+hardware (375.7s, grounded answer, correct citations). Logged the
+latency reframe (D-022) and updated `trd.md` §6 to match reality instead
+of leaving a contradicted stale target. Built full Phase 5: planner,
+curator (finally implementing the D-010-documented node), sufficiency
+check with retry cap, and the LangGraph state machine wiring them
+together. Wired `main.py`'s complex-query path to actually call
+`run_agentic()` instead of printing a placeholder message. Added
+stage-progress output inside the graph's nodes for the same UX reason
+as D-021.
+**Decisions logged this run:** D-022 (latency reframe + Phase 4
+closure), D-023 (Phase 5 build, curator-as-heuristic rationale,
+MAX_RETRIES=2 rationale, UX gap noted).
+**Debug entries logged this run:** none — everything passed on first
+implementation this round.
+**Phase 5 exit criteria met?** Partially. Strongest verification yet:
+13/13 unit-logic checks + 9/9 full-compiled-graph-execution checks,
+including a genuinely cycling and cap-respecting retry loop confirmed
+via call-count assertions, not just state inspection. NOT verified: the
+real model + real network together on an actual complex query — every
+test so far uses a scripted stub model.
+**Next action for next session:** get a real end-to-end `main.py` run
+with a genuinely complex/multi-part query (something that should trigger
+the agentic path, e.g. a comparison question) and report the output +
+timing, same pattern as every prior phase's closure.
+
+### Entry 007
+**Phase:** 4
+**Action taken:** Confirmed Phase 3 fully complete (real-hardware network
+verification of all 3 tools + full retrieve/rerank pipeline passed —
+logged as D-020). Wrote Phase 4: `core/router.py` (heuristic complexity
+classifier, no LLM call), `rag/synthesis.py` (citation-forcing generation
+shared across fast/agentic paths), rewrote `main.py` to wire the complete
+fast-path pipeline end-to-end.
+**Decisions logged this run:** D-020 — Phase 3 closure + router-is-
+heuristic-not-LLM rationale + explicit flag that the latency problem is
+now concrete (fast path = 2 chained LLM calls at ~1.7 tok/s).
+**Debug entries logged this run:** none — 17/17 passed on first run.
+**Phase 4 exit criteria met?** Partially. Logic verified
+(`test_phase4_manual.py`, 17/17). NOT verified: an actual end-to-end
+`main.py` run with the real model against a real query — needs the user
+to run it and report output/timing.
+**Next action for next session:** get real-machine output from `py
+src/main.py "some research question"` — this will be the first true
+end-to-end confirmation of the whole pipeline, and will also surface the
+real per-query latency number the D-015/D-017/D-018 thread has been
+tracking. Do not start Phase 5 until this is reported.
 
 ### Entry 006
 **Phase:** 1/2 wrap-up + Phase 3
