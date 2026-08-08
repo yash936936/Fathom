@@ -316,5 +316,90 @@ interfering with the large mmap'd model file during inference.
 **Files touched:** none — still diagnosis-only, no code changes made in
 response to an unconfirmed root cause.
 
+### D-017 — use_mmap=False: confirmed ~2x generation speedup, real memory tradeoff
+**Phase:** 1/2 (verification, resolved partially)
+**Finding:** User tested `use_mmap=False` directly: generation time for
+the same ~40-token reply dropped from 42.3s to 23.6s (~1.7 tok/s, up from
+~0.9 tok/s). This confirms disk I/O via memory-mapping was a real,
+measurable contributor to the slowdown on the reference dev machine —
+not the whole story (still well short of `trd.md`'s <5s fast-path
+target), but a genuine, reproducible improvement, not noise.
+**Decision:** Set `use_mmap=False` as the default in
+`core/llm_backend.py`, not left as a manual flag.
+**Tradeoff, stated plainly:** this is not a free win. `use_mmap=True`
+(llama.cpp's default) lets the OS page model weights in/out of RAM on
+demand; `use_mmap=False` forces the full ~2.3GB file into resident
+process memory upfront. Against `trd.md` §1's <6GB budget, this is a
+real cost, not a rounding error — it trades some memory headroom for
+generation speed. Flagged here rather than presented as a strictly
+better default.
+**Still open:** ~1.7 tok/s remains below the `trd.md` latency target.
+This is a partial fix, not a resolution — root cause of the *remaining*
+gap (Defender scanning, thermal/power throttling, or something else) is
+still undiagnosed. Not blocking Phase 3 any further per the override
+below (D-018), but the gap is carried forward as a known, unresolved
+risk, not silently dropped.
+**Files touched:** `src/core/llm_backend.py`.
+
+### D-018 — Proceeding to Phase 3 with latency gap still open (explicit override)
+**Phase:** 3
+**Decision:** User asked to proceed twice in a row despite the
+unresolved latency gap (first "phase 4," corrected to Phase 3 given
+`phases.md`'s dependency order). Per the same pattern as D-014, this is
+logged as a deliberate, informed override — the user has now seen the
+diagnostic trail (D-015 wrong hypothesis, D-016 disproven, D-017 partial
+fix) and chosen to proceed rather than keep debugging further right now.
+**Risk carried forward, not resolved:** Phase 3's retrieval/tool layer
+will be built and tested against a model that still generates at
+roughly 1.7 tok/s against a <5s fast-path target. Anything built in
+Phase 3 that assumes fast per-call LLM turnaround (e.g. multiple
+sub-query calls in the agentic path, Phase 5) will need re-evaluation
+once the underlying latency issue is actually resolved.
+**Follow-up:** the remaining latency gap stays open in `status.md`
+blockers — not closed, just deprioritized relative to making forward
+progress on functionality first.
+
+### D-019 — Phase 3 ships BM25-only retrieval, no dense embeddings or cross-encoder reranker
+**Phase:** 3
+**Decision:** `rag/retriever_hybrid.py` and `rag/reranker.py` implement
+lexical (BM25) retrieval and a heuristic (BM25-score + recency-boost)
+reranker. Neither ships the dense-embedding half of "hybrid" search nor
+a learned cross-encoder reranker that `trd.md` §4 originally named as
+the v1 target.
+**Rationale:** Both real options for dense embeddings/cross-encoder
+reranking (sentence-transformers-class models) depend on `torch`, which
+is a large, heavy dependency that directly conflicts with `trd.md` §1's
+CPU-only/<6GB constraint — the same category of problem already flagged
+for NeMo Guardrails in D-013 and the tool-integration platforms rejected
+in D-010. This is an explicit, logged deviation from `trd.md`, not a
+silent one (`workflow.md` §5).
+**Alternative considered and rejected for now:** using the already-loaded
+Qwen3-4B model itself in embedding mode (llama.cpp supports this) to
+avoid adding a new dependency. Rejected because it would require a
+second model instance loaded simultaneously (one for chat, one for
+embeddings), roughly doubling the already-tight RAM budget — worse than
+the dependency-weight problem it would solve.
+**Revisit condition:** if Phase 6/10 eval data shows BM25-only retrieval
+has a specific, reproducible recall gap that dense retrieval would close,
+revisit with a concrete lightweight-embedding option in hand (e.g. a
+small ONNX-runtime-based embedding model, which avoids torch) rather
+than defaulting to sentence-transformers.
+**Naming note:** `tools/vector_store.py` keeps its name from
+`architecture.md` despite not being a vector store in v1 — the
+`RetrievedChunk`-shaped interface is stable, so a real dense backend can
+be swapped in later without touching callers in `rag/retriever_hybrid.py`.
+**Files touched:** `src/tools/registry.py`, `src/tools/web_search.py`,
+`src/tools/arxiv_feed.py`, `src/tools/news_feed.py`,
+`src/tools/vector_store.py`, `src/rag/retriever_hybrid.py`,
+`src/rag/reranker.py`, `requirements.txt`.
+**Verification:** see `debug.md` B-004 for a real bug found and fixed
+during this phase (tool self-registration via import side-effects).
+11/11 checks passing in `test_phase3_manual.py` for everything testable
+without network access (registry, BM25 store, dedupe, reranker logic).
+`web_search.py`/`arxiv_feed.py`/`news_feed.py`'s actual network/parsing
+against live endpoints is UNVERIFIED in this sandbox (same limitation as
+B-001) — needs testing on a real machine before Phase 3 is marked
+complete.
+
 ---
 **Return to `/context.md` for next steps.**

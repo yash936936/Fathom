@@ -96,11 +96,22 @@ class FathomModel:
 
         # n_gpu_layers=0 is explicit, not incidental -- trd.md §1 is
         # CPU-only by hard requirement, not just by default.
+        #
+        # use_mmap=False is also explicit, per decisions.md D-017: on the
+        # reference dev machine, memory-mapping the GGUF (llama.cpp's
+        # default) meant weight pages were read from disk on-demand
+        # during generation, not just once at load. Disabling mmap forces
+        # the full file into RAM upfront (slower load, ~60s vs ~68s is
+        # actually about the same -- the win is entirely in generation
+        # speed) and measured ~2x faster generation in practice. This
+        # trades load time for generation time, which is the right trade
+        # for a tool that loads once and answers many queries per run.
         self._llama = Llama(
             model_path=str(self.model_path),
             n_ctx=n_ctx,
             n_threads=n_threads or os.cpu_count() or 4,
             n_gpu_layers=0,
+            use_mmap=False,
             verbose=verbose,
         )
         self.n_ctx = n_ctx

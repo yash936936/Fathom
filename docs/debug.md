@@ -80,5 +80,31 @@ boolean expression in `output_rail()`.
 Test 12 (a properly cited answer) still passes, confirming the fix
 didn't over-tighten the check.
 
+### B-004 — Tools never self-registered because nothing imported them
+**Phase:** 3
+**Symptom:** `test_phase3_manual.py`'s `list_tools()` check failed:
+only `curated_search` appeared registered, even though `web_search.py`,
+`arxiv_feed.py`, and `news_feed.py` all have `@register_tool` decorators
+at module level.
+**Root cause:** `@register_tool` only runs when its module is actually
+imported — Python doesn't scan the filesystem for decorators. The test
+(and, worse, `rag/retriever_hybrid.py` itself) only imported
+`tools.registry` and `tools.vector_store` directly; nothing imported
+`web_search`/`arxiv_feed`/`news_feed`, so their registration side-effects
+never ran. This wasn't just a test artifact — `retriever_hybrid.retrieve()`
+calling `dispatch("web_search", ...)` in the real app would have hit the
+exact same `KeyError` the first time it ran, since nothing in the actual
+call path imported those modules either.
+**Fix:** Added explicit imports of all four tool modules to
+`tools/__init__.py`, so importing the `tools` package itself (which
+`retriever_hybrid.py` already needs to do) triggers every tool's
+registration. Added a top-level `import tools` to
+`rag/retriever_hybrid.py` and to `test_phase3_manual.py` to make this
+dependency explicit rather than accidental.
+**Files touched:** `src/tools/__init__.py`, `src/rag/retriever_hybrid.py`,
+`test_phase3_manual.py`.
+**Verification:** re-ran `test_phase3_manual.py` — 11/11 passing,
+`list_tools()` now correctly shows all four built-in tools.
+
 ---
 **Return to `/context.md` for next steps.**

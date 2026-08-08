@@ -1,5 +1,15 @@
-# Phase 1 -- core model backend only. Later phases add: langgraph,
-# rank-bm25 or equivalent, sentence-transformers/cross-encoder for
-# reranking, nemoguardrails, etc. -- add them in the phase that needs
-# them, not preemptively (see workflow.md §2 scope discipline).
+# Phase 1
 llama-cpp-python>=0.3.0
+
+# Phase 3 -- tools & hybrid retrieval. See docs/decisions.md D-019:
+# sentence-transformers (dense embeddings/cross-encoder reranking) was
+# deliberately NOT added -- it pulls in torch, which conflicts with
+# trd.md §1's CPU-only/<6GB footprint constraint. rank_bm25 and requests
+# are both lightweight, pure-Python(-ish), no heavy transitive deps.
+requests>=2.31
+rank_bm25>=0.2.2
+
+# Add further phase-scoped dependencies here as each phase needs them,
+# not preemptively (workflow.md §2 scope discipline). Anticipated next:
+# langgraph (Phase 5), nemoguardrails (only if D-013's revisit condition
+# is met).

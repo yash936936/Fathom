@@ -7,32 +7,64 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 1/2 — blocked on unexplained latency, not on
-  correctness
-- **Phase status:** Correctness confirmed for both phases: model loads
-  and generates coherent output; `classify_domain()` scored 5/5 on a
-  real-model smoke test (0.95–0.99 confidence), including correctly
-  catching an injection-style query. BUT: generation speed measured at
-  ~0.9 tok/s (68.2s model load, 46.6s for a ~40-token reply), roughly
-  10-20x slower than expected for this hardware profile with full AVX512
-  + weight-repack acceleration confirmed active (see decisions.md D-016 —
-  D-015's "missing SIMD" hypothesis was tested and disproven). This fails
-  `trd.md`'s latency targets outright, not marginally.
-- **Next phase:** Phase 3 — Tools & hybrid retrieval. NOT started.
-  Deliberately held per D-015/D-016: building retrieval/RAG on top of an
-  unexplained ~20x slowdown means every later phase inherits and
-  compounds an undiagnosed problem.
-- **Blockers:** root cause of the slowdown is unidentified. User handed
-  three diagnostic steps to try: (1) close VS Code/other CPU-competing
-  processes, test from a plain terminal, (2) confirm Windows power plan
-  isn't throttling (Balanced/Power saver/on-battery), (3) if neither
-  resolves it, test Windows Defender real-time-scan interference with
-  the mmap'd model file. Waiting on results before Phase 3 starts, or an
-  explicit user override to proceed anyway with the risk acknowledged.
+- **Active phase:** Phase 3 — Tools & hybrid retrieval
+- **Phase status:** Code written for all six files
+  (`tools/registry.py`, `web_search.py`, `arxiv_feed.py`, `news_feed.py`,
+  `vector_store.py`, `rag/retriever_hybrid.py`, `rag/reranker.py`).
+  11/11 logic checks passing for everything testable without network
+  access (registry dispatch, BM25 curated store, dedupe, reranker
+  scoring/recency/top_k). `web_search`/`arxiv_feed`/`news_feed`'s actual
+  HTTP calls against live endpoints are UNVERIFIED — sandbox can't reach
+  duckduckgo.com/export.arxiv.org/news.google.com. Needs testing on a
+  real machine before Phase 3 is marked complete.
+- **Latency status (carried over, not resolved):** `use_mmap=False` gave
+  a confirmed ~2x generation speedup (42.3s → 23.6s for the same reply)
+  but generation still runs well below `trd.md`'s target. Proceeding to
+  Phase 3 anyway was an explicit user override (D-018) — this risk is
+  still open, not closed, and will compound if not addressed before
+  Phase 5's agentic loop (which makes multiple LLM calls per query).
+- **Next phase:** Phase 4 — Adaptive routing + fast path. NOT started —
+  user asked for this directly but was redirected to Phase 3 first per
+  `phases.md`'s dependency order (Phase 4's fast path needs Phase 3's
+  retrieval to exist).
+- **Blockers:** (1) real-machine verification of the three network-tool
+  files, (2) the still-open latency gap from Phase 1/2, carried forward
+  rather than resolved.
 
 ---
 
 ## Log (newest first)
+
+### Entry 006
+**Phase:** 1/2 wrap-up + Phase 3
+**Action taken:** Applied `use_mmap=False` to `llm_backend.py` as a
+default (confirmed ~2x generation speedup, real memory tradeoff logged
+in D-017). Proceeded to Phase 3 on explicit user override (D-018),
+latency gap still open. Wrote all 7 Phase 3 files: `tools/registry.py`,
+`web_search.py` (DuckDuckGo HTML), `arxiv_feed.py` (arXiv Atom API),
+`news_feed.py` (Google News RSS) — all three no-API-key by design —
+`vector_store.py` (BM25-backed curated store), `rag/retriever_hybrid.py`
+(fan-out + dedupe), `rag/reranker.py` (BM25-score + recency heuristic).
+**Decisions logged this run:** D-017 (mmap tradeoff), D-018 (Phase 3
+override with latency risk carried forward), D-019 (BM25-only retrieval/
+heuristic reranker instead of dense embeddings/cross-encoder, torch
+dependency conflict with trd.md §1).
+**Debug entries logged this run:** B-004 — tools weren't self-registering
+because nothing imported their modules; fixed via `tools/__init__.py`
+importing all four tool modules, so package import triggers
+registration.
+**Phase 3 exit criteria met?** Partially. Everything testable without
+network access passes (11/11 in test_phase3_manual.py). NOT verified:
+the three network-calling tools against their real live endpoints —
+sandbox can't reach duckduckgo.com/export.arxiv.org/news.google.com.
+**Next action for next session:** on a real machine, run
+`test_phase3_manual.py` (should still pass, no network needed) AND
+manually test `web_search.search("test query")`,
+`arxiv_feed.search("test query")`, `news_feed.search("test query")`
+directly to confirm the HTML/XML parsing actually works against live
+responses — parsers were written against expected formats, not verified
+against real ones. Also: circle back to the still-open latency gap
+before Phase 5 (agentic loop) makes it worse.
 
 ### Entry 005
 **Phase:** 1 (troubleshooting) + 2 (wrap-up)
