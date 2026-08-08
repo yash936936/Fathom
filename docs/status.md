@@ -8,37 +8,113 @@
 
 ## Current state
 - **Active phase:** Phase 5 — Agentic path (LangGraph)
-- **Phase status:** Phase 4 is now FULLY CONFIRMED — real end-to-end run
-  succeeded (375.7s, correct grounded answer with resolving citations,
-  see decisions.md D-022). Latency target REVISED (not abandoned) in
-  `trd.md` §6 per D-022 — Fathom is scoped as a research tool tolerant of
-  multi-minute answers, not a chat tool. Phase 5 code written:
-  `rag/planner.py`, `rag/curator.py`, `rag/sufficiency.py`, `rag/graph.py`
-  (LangGraph state machine), `main.py` wired to call `run_agentic()` for
-  complex queries. 13/13 unit-logic checks + 9/9 full-graph-execution
-  checks passing (`test_phase5_manual.py`, `test_phase5_graph.py`) —
-  the graph checks are the strongest verification yet, since they run
-  the actual compiled LangGraph state machine including a genuinely
-  cycling, cap-respecting retry loop, not just isolated function logic.
-- **Latency (accepted per D-022, compounding as expected in Phase 5):**
-  agentic path chains planner + up to 3 retrieval/sufficiency round
-  trips + synthesis — several times the 375.7s fast-path baseline for a
-  complex query. This is the expected, accepted consequence of D-022's
-  choice, not a new surprise.
-- **UX gap noted, not yet fixed:** agentic path has stage-progress
-  printing (D-023) but not full token streaming during synthesis like
-  the fast path has (D-021) — flagged, not silently left out.
+- **Phase status:** Three real bugs found and fixed across three real
+  hardware runs of the SAME comparison query — the retry-refinement
+  mechanism has now been genuinely hardened by real-world scrutiny, not
+  just code review. Run 1 (B-005/D-024): retries repeated identical
+  searches and discarded prior evidence. Run 2 (B-006/D-025): the fix
+  for that sent raw prose sentences to search APIs as "queries." Run 3
+  (B-007/D-026): the fix for that was safe but the model often returns
+  an empty search_query despite being told not to — fixed with a
+  bounded, LLM-free keyword-extraction fallback, tested directly against
+  the real gap text from the live run. Full regression sweep: 68/68.
+- **NOT yet verified:** B-007's fix has not been run on real hardware.
+  Pattern held three times running now — do not treat a green test
+  suite as equivalent to a clean real run until it actually happens.
+- **Latency (accepted per D-022):** unchanged.
 - **Next phase:** Phase 6 — Hallucination/verification layer. Should not
-  start until Phase 5's real-model + real-network agentic run is
-  confirmed on real hardware.
-- **Blockers:** real-machine verification of `run_agentic()` end-to-end
-  (a real complex/multi-part query, with the real model and real
+  start until the FIXED Phase 5 is confirmed on real hardware — the
+  prior confirmation was of buggy behavior that happened to produce a
+  correct-looking result.
+- **Blockers:** real-machine verification of the fixed `run_agentic()`
   retrieval) has not been run yet — only stub-based graph execution is
   confirmed so far.
 
 ---
 
 ## Log (newest first)
+
+### Entry 011
+**Phase:** 5, third bug fix in the same retry-refinement mechanism
+**Action taken:** third real-hardware run of the fusion-vs-fission
+comparison query showed B-006's fix was safe (no prose sent as queries)
+but silently inert — the model returned an empty `search_query` field
+despite explicit instruction, so retries were still non-functional
+no-ops. Added `_fallback_query_from_gap()`, a bounded, stopword-filtered
+keyword extractor used only when the model itself gives nothing usable.
+Verified directly against the exact `gap` text from the live run, not a
+synthetic fixture.
+**Decisions logged this run:** D-026 — names this as the third fix in a
+sequence on the same mechanism, explicit that green tests weren't
+sufficient confidence at any prior point in this sequence.
+**Debug entries logged this run:** B-007 — root cause (prompt
+non-compliance, not a code mishandling bug like B-005/B-006) + fix.
+**Phase 5 exit criteria met?** Still not fully — same real-hardware
+confirmation gap as after every fix in this phase so far. 68/68 full
+regression sweep.
+**Next action for next session:** re-run the same query one more time.
+This time, check whether the answer actually surfaces fission-reactor
+content, not just whether the mechanics look right — three fixes in on
+the plumbing, the actual research-quality question (does better
+retrieval refinement produce a better answer) still hasn't been
+confirmed. If it still can't find fission sources even with a real
+extracted query, that may be a genuine source-availability limit rather
+than a bug — worth distinguishing those two outcomes explicitly.
+
+### Entry 010
+**Phase:** 5, second bug fix
+**Action taken:** User re-ran the same comparison query with B-005's fix
+applied. Mechanics worked (sub_queries genuinely grew, evidence
+accumulated) but answer quality got worse — traced to the fix appending
+raw prose (the sufficiency `gap` explanation) as a literal search query,
+returning near-random results. Fixed by splitting
+`rag/sufficiency.py`'s output schema into `gap` (prose, user-facing
+only) and a new `search_query` field (short, validated, the only thing
+used for retry re-retrieval). Added a structural 8-word-max rejection
+as a backstop, not just a better prompt.
+**Decisions logged this run:** D-025 — names the pattern behind both
+B-005 and B-006 (conflating human-readable explanation fields with
+machine-usable input) rather than treating them as unrelated one-offs.
+**Debug entries logged this run:** B-006 — full root cause + fix.
+**Phase 5 exit criteria met?** Still not fully. Two bugs fixed, 67/67
+regression passing, but the B-006 fix itself has NOT been run on real
+hardware yet — same gap as after B-005's fix, which is exactly what
+surfaced B-006 in the first place. Don't skip the real-hardware
+confirmation step again.
+**Next action for next session:** re-run the same fusion-vs-fission
+comparison query once more. Specifically check that any new sub_queries
+printed in the "Retrieving evidence" stage output look like real search
+terms (a few words), not sentences — that's the direct, visible signal
+the B-006 fix is working before even looking at the final answer.
+
+### Entry 009
+**Phase:** 5, bug fix
+**Action taken:** User's first real agentic-path run succeeded
+end-to-end (444.1s) with correct, honest behavior on the surface. Close
+inspection of the run revealed a real design gap: the retry loop wasn't
+actually refining its search or accumulating evidence — flagged directly
+rather than accepting the run as a clean pass just because tests were
+green and the output looked reasonable. Fixed both the substantive bug
+(`rag/graph.py`: accumulate evidence, refine sub_queries with the
+sufficiency gap on retry) and a cosmetic duplicate print in `main.py`.
+Renamed `retriever_hybrid._dedupe` to public `dedupe` for cross-module
+reuse. Added a new regression test in `test_phase5_graph.py` that would
+have failed against the pre-fix code.
+**Decisions logged this run:** D-024 — real-run finding + why a
+non-refining retry loop matters more here than a typical bug, given the
+accepted per-call cost from D-022.
+**Debug entries logged this run:** B-005 — full root-cause writeup.
+**Phase 5 exit criteria met?** Still not fully — the FIXED code has not
+been run on real hardware yet. Only the buggy version has real-world
+confirmation. Full regression sweep post-fix: 65/65 across all 5 test
+files.
+**Next action for next session:** re-run the same fusion-vs-fission
+style comparison query (or a similar multi-part one) on real hardware
+with the fixed code, and specifically check whether the second/third
+retrieval attempt's sub_queries actually differ from the first (visible
+in principle by what gets retrieved, though not currently printed to
+stderr — worth adding if this needs to be visually confirmed rather than
+inferred from the final answer's content).
 
 ### Entry 008
 **Phase:** 4 closure + 5

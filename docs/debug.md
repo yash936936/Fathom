@@ -106,5 +106,119 @@ dependency explicit rather than accidental.
 **Verification:** re-ran `test_phase3_manual.py` — 11/11 passing,
 `list_tools()` now correctly shows all four built-in tools.
 
+### B-005 — Agentic retry loop never actually refined its search, and discarded prior evidence each attempt
+**Phase:** 5
+**Symptom:** first real end-to-end agentic run (a fusion-vs-fission
+comparison query) ran the full retry loop to cap (3 retrieval attempts)
+but still concluded it had no fission-related evidence at all. Correct
+*behavior* on the surface (honest refusal instead of fabricating a
+comparison), but the retries weren't doing their job.
+**Root cause:** two compounding issues in `rag/graph.py`, both real
+gaps against `code_logic.md` §4's documented design, not edge cases:
+(1) `retrieval_node` *overwrote* `state["retrieved_chunks"]` on every
+call instead of accumulating, so each retry discarded the previous
+attempt's evidence entirely; (2) the retry loop looped straight back
+from `retry_increment_node` to `retrieval_node` without ever acting on
+`code_logic.md`'s documented "refine sub_queries using gap" step — the
+identical `sub_queries` from the initial plan were re-run unchanged on
+every attempt, so retries fetched near-identical results instead of
+searching for what the sufficiency check said was actually missing.
+Given each retry costs a full expensive round trip
+(decisions.md D-022), this made the retry budget close to wasted work.
+**Fix:** `retrieval_node` now accumulates (`state.get("retrieved_chunks",
+[]) + new_chunks`) and dedupes via `retriever_hybrid.dedupe()` (renamed
+from private `_dedupe` to a public name for this cross-module reuse).
+`retry_increment_node` now appends the sufficiency check's `gap` text
+as an additional sub_query before looping back — a genuinely refined
+search on retry, not a repeat, and at zero extra LLM cost (retrieval
+tool calls are network I/O, not model calls).
+**Also fixed in the same pass:** `main.py` printed "Checking request..."
+twice (a leftover duplicate in the complex-path branch) — cosmetic,
+fixed alongside the substantive bug since it was found in the same
+real-run output.
+**Files touched:** `src/rag/graph.py`, `src/rag/retriever_hybrid.py`
+(dedupe renamed public), `src/main.py`, `test_phase3_manual.py`
+(updated for the rename), `test_phase5_graph.py` (added a new
+regression test specifically for accumulation + gap-refinement, which
+would have failed against the old code).
+**Verification:** full regression sweep across all five test files after
+the fix — 65/65 passing (13 + 11 + 17 + 13 + 11). The new regression
+test in `test_phase5_graph.py` confirms both the accumulation (3 chunks
+across 2 attempts, matching the exact expected count once sub_queries
+correctly grew) and the gap-based sub_query refinement.
+
+### B-006 — B-005's own fix sent prose sentences to search engines as "queries"
+**Phase:** 5, second real-hardware run
+**Symptom:** re-running the same fusion-vs-fission comparison query
+after B-005's fix showed the mechanics working (sub_queries genuinely
+grew across attempts: 2 -> 3 -> 4, evidence accumulated) but the answer
+got WORSE, not better -- attempt 3 retrieved completely unrelated papers
+(a humanoid robotics paper, an unrelated math paper) instead of
+fission-reactor sources.
+**Root cause:** B-005's fix appended `state["sufficiency_gap"]` --
+intended as a human-readable explanation for the user-facing caveat --
+directly as a new sub_query sent to web_search/arxiv/news APIs. Real
+example from the live run: the "query" sent was `"The evidence provided
+does not contain any information about recent progress in fusion energy
+or advances in next-generation fission reactor designs. The links and
+content mentioned are unrelated to the topic..."` -- a full prose
+sentence, not a search term. Search engines returned near-random matches
+for it, actively degrading retrieval quality on retry rather than
+improving it. This is a worse failure mode than B-005's original bug
+(silently not improving) because it's silently making things actively
+worse while still looking mechanically correct in the stage-progress
+output.
+**Fix:** Split the sufficiency check's output schema
+(`rag/sufficiency.py`) into two separate fields: `gap` (prose, for the
+user-facing caveat only, unchanged) and a new `search_query` field, with
+an explicit prompt instruction that it must be search-engine-shaped, a
+few words, never a sentence. Added a defense-in-depth sanity check in
+`sufficiency_node()` that rejects any `search_query` longer than 8 words
+outright (flagged via
+`guardrail_flags: sufficiency_search_query_rejected_not_query_shaped`)
+rather than trusting the prompt instruction alone -- we just watched the
+model conflate these two things once already, so a second, structural
+guard was warranted, not just a better prompt. `core/state.py` gained a
+dedicated `refined_search_query` field, kept separate from
+`sufficiency_gap` by design so this specific conflation can't recur.
+`rag/graph.py`'s `retry_increment_node` now reads `refined_search_query`,
+never `sufficiency_gap`, when building the next retry's sub_queries.
+**Files touched:** `src/rag/sufficiency.py`, `src/rag/graph.py`,
+`src/core/state.py`, `test_phase5_manual.py` (added a regression test
+for the 8-word rejection), `test_phase5_graph.py` (updated scripted
+responses to the new schema, fixed Test 4's assertion to check for the
+query-shaped text landing in `sub_queries`, not the prose gap).
+**Verification:** full regression sweep, 67/67 across all five test
+files (13+11+17+15+11). The new B-006 regression test specifically
+confirms a deliberately prose-shaped `search_query` gets rejected and
+flagged rather than silently accepted. NOT yet verified: this second
+fix has not been run on real hardware -- same pattern as B-005, the
+prior "confirmation" was of the version with this exact bug.
+
+### B-007 — B-006's fix was safe but the model still didn't produce usable queries (empty, not malformed)
+**Phase:** 5, third real-hardware run
+**Symptom:** re-running the query after B-006's fix showed sub_queries
+staying at exactly 2 across all 3 retrieval attempts, with no
+`sufficiency_search_query_rejected_not_query_shaped` flag printed
+either -- meaning `search_query` wasn't too long (B-006's case), it was
+empty.
+**Root cause:** the local Qwen3-4B model doesn't reliably follow the
+"always provide a search_query when insufficient" instruction --
+sometimes it returns `""` despite the explicit prompt requirement. This
+isn't a code bug in the same sense as B-005/B-006 (nothing was
+mishandled), it's a real prompt-compliance limitation of a small local
+model that the code needs to route around rather than assume away.
+**Fix:** see decisions.md D-026 -- added `_fallback_query_from_gap()`,
+a bounded, LLM-free keyword extraction from the `gap` field, used only
+when the model itself provides nothing usable. Also strengthened the
+prompt with an explicit example and a firmer instruction, though the
+code fallback is the real fix -- prompt wording alone was already tried
+once (the original schema instruction) and wasn't sufficient.
+**Files touched:** `src/rag/sufficiency.py`, `test_phase5_manual.py`.
+**Verification:** fallback tested directly against the exact real-world
+`gap` text observed in the live run (not a synthetic fixture) --
+produces a genuinely usable 8-word-or-fewer query. Full regression
+sweep: 68/68. Real-hardware re-confirmation still outstanding.
+
 ---
 **Return to `/context.md` for next steps.**

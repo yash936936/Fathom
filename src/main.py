@@ -83,7 +83,6 @@ def run_fast_path(query: str, model, max_tokens: int, top_k: int) -> tuple[str, 
 
     state = route(state)
     if state["path"] == "complex":
-        print("Checking request...", file=sys.stderr)
         print("Planning multi-step research...", file=sys.stderr)
         from rag.graph import run_agentic
 

@@ -68,15 +68,40 @@ check("curator drops low-alpha-ratio chunk", "c" not in curated_ids)
 check("curator drops zero-overlap chunk", "d" not in curated_ids)
 
 # --- sufficiency.check_sufficiency + should_retry ---
-model = StubModel(['{"sufficient": true, "gap": ""}'])
-sufficient, gap = check_sufficiency("q", [], model)
-check("sufficiency parses sufficient=true", sufficient is True and gap == "")
+model = StubModel(['{"sufficient": true, "gap": "", "search_query": ""}'])
+sufficient, gap, search_query = check_sufficiency("q", [], model)
+check("sufficiency parses sufficient=true", sufficient is True and gap == "" and search_query == "")
 
-model = StubModel(['{"sufficient": false, "gap": "missing recent data"}'])
+model = StubModel(['{"sufficient": false, "gap": "missing recent data", "search_query": "recent fusion energy news"}'])
 state = new_state("q")
 state["retry_count"] = 0
 state = sufficiency_node(state, model)
 check("sufficiency_node sets state fields", state["sufficiency"] is False and state["sufficiency_gap"] == "missing recent data")
+check("sufficiency_node sets refined_search_query separately from gap", state["refined_search_query"] == "recent fusion energy news")
+
+# --- B-006 regression: a prose "search_query" gets rejected, not used as-is ---
+model = StubModel(['{"sufficient": false, "gap": "missing data", "search_query": "This is a full sentence explanation, not a real search query at all"}'])
+state2 = new_state("q")
+state2 = sufficiency_node(state2, model)
+check(
+    "prose-shaped search_query (>8 words) is rejected, not passed through",
+    state2["refined_search_query"] is None and "sufficiency_search_query_rejected_not_query_shaped" in state2["guardrail_flags"],
+)
+
+# --- D-026 regression: real-hardware run showed the model sometimes
+# returns an EMPTY search_query despite being told to always provide
+# one -- confirm the LLM-free fallback kicks in using the real gap text
+# observed in that run, rather than silently giving up on refinement. ---
+real_world_gap = "Recent progress in fusion energy and specific advances in next-generation fission reactor designs are not covered in the provided evidence"
+model3 = StubModel([f'{{"sufficient": false, "gap": "{real_world_gap}", "search_query": ""}}'])
+state3 = new_state("q")
+state3 = sufficiency_node(state3, model3)
+check(
+    "empty search_query falls back to a bounded, keyword-derived query from gap",
+    state3["refined_search_query"] is not None
+    and len(state3["refined_search_query"].split()) <= 8
+    and "refined_search_query_derived_from_gap_fallback" in state3["guardrail_flags"],
+)
 check("should_retry True when insufficient and under cap", should_retry(state) is True)
 
 state["retry_count"] = MAX_RETRIES

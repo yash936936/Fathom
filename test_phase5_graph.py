@@ -46,7 +46,7 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
     model = StubModel(
         [
             '{"sub_queries": ["fusion energy progress"], "requires_recency": true}',  # planner
-            '{"sufficient": true, "gap": ""}',  # sufficiency check -- passes immediately
+            '{"sufficient": true, "gap": "", "search_query": ""}',  # sufficiency check -- passes immediately
             "Fusion energy has progressed significantly [web:0].",  # synthesis
         ]
     )
@@ -63,8 +63,8 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
     model2 = StubModel(
         [
             '{"sub_queries": ["fusion energy progress"], "requires_recency": true}',  # planner
-            '{"sufficient": false, "gap": "need more specific recent data"}',  # 1st sufficiency check -- insufficient
-            '{"sufficient": true, "gap": ""}',  # 2nd sufficiency check (after retry) -- sufficient
+            '{"sufficient": false, "gap": "need more specific recent data", "search_query": "fusion energy 2026 progress"}',  # 1st sufficiency check -- insufficient
+            '{"sufficient": true, "gap": "", "search_query": ""}',  # 2nd sufficiency check (after retry) -- sufficient
             "Fusion energy has progressed [web:0].",  # synthesis
         ]
     )
@@ -78,7 +78,7 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
     from rag.graph import run_agentic as run_agentic_3
     from rag.sufficiency import MAX_RETRIES
 
-    always_insufficient = ['{"sufficient": false, "gap": "still missing data"}'] * (MAX_RETRIES + 1)
+    always_insufficient = ['{"sufficient": false, "gap": "still missing data", "search_query": "query still missing"}'] * (MAX_RETRIES + 1)
     model3 = StubModel(
         ['{"sub_queries": ["q"], "requires_recency": false}']
         + always_insufficient
@@ -87,6 +87,51 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
     final_state3 = run_agentic_3("some query", model3)
     check(f"retry cap respected -- retry_count == MAX_RETRIES ({MAX_RETRIES})", final_state3.get("retry_count") == MAX_RETRIES)
     check("gap is surfaced in the final answer, not silently dropped", "missing data" in final_state3.get("answer", "") or "incomplete" in final_state3.get("answer", "").lower())
+
+# --- Test 4: retry actually refines sub_queries with the gap, and evidence accumulates ---
+# Regression test for the real bug found in the first live run (see
+# decisions.md D-024): retries used to silently re-run identical
+# sub_queries and discard prior evidence.
+call_count = {"n": 0}
+
+
+def incrementing_retrieve(query, tool_names=None, max_results_per_tool=5):
+    call_count["n"] += 1
+    return [
+        RetrievedChunk(
+            source_id=f"web:{call_count['n']}",
+            content=f"Compare X and Y: distinct evidence chunk number {call_count['n']} relevant to {query}",
+            source="s",
+            url=None,
+            date=None,
+            relevance_score=1.0,
+        )
+    ]
+
+
+with patch("rag.graph.retrieve", side_effect=incrementing_retrieve):
+    from rag.graph import run_agentic as run_agentic_4
+
+    model4 = StubModel(
+        [
+            '{"sub_queries": ["original query"], "requires_recency": false}',
+            '{"sufficient": false, "gap": "missing fission reactor data", "search_query": "small modular reactor 2026"}',
+            '{"sufficient": true, "gap": "", "search_query": ""}',
+            "Final answer [web:1][web:2].",
+        ]
+    )
+    final_state4 = run_agentic_4("compare X and Y", model4)
+    check(
+        "retry appends the refined search_query (not the prose gap) as a new sub_query",
+        "small modular reactor 2026" in final_state4.get("sub_queries", [])
+        and "missing fission reactor data" not in final_state4.get("sub_queries", []),
+    )
+    check(
+        "evidence accumulates across retries (3 chunks: 1 from attempt 1 + "
+        "2 from attempt 2, which re-queries original AND the new "
+        "search_query-based sub_query -- not overwritten down to 1)",
+        len(final_state4.get("retrieved_chunks", [])) == 3,
+    )
 
 print()
 n_pass = sum(1 for _, ok in results if ok)

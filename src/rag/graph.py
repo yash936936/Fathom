@@ -24,7 +24,7 @@ from core.state import ResearchState
 from rag.curator import curate
 from rag.planner import plan_node
 from rag.reranker import rerank
-from rag.retriever_hybrid import retrieve
+from rag.retriever_hybrid import dedupe, retrieve
 from rag.sufficiency import should_retry, sufficiency_node
 from rag.synthesis import generate
 
@@ -42,11 +42,24 @@ def build_graph(model: FathomModel, top_k: int = 8):
         return plan_node(state, model)
 
     def retrieval_node(state: ResearchState) -> ResearchState:
-        print(f"  Retrieving evidence (attempt {state.get('retry_count', 0) + 1})...", file=sys.stderr)
-        all_chunks = []
-        for sub_query in state.get("sub_queries", [state["original_query"]]):
-            all_chunks.extend(retrieve(sub_query))
-        state["retrieved_chunks"] = all_chunks
+        sub_qs = state.get("sub_queries", [state["original_query"]])
+        print(
+            f"  Retrieving evidence (attempt {state.get('retry_count', 0) + 1}, "
+            f"{len(sub_qs)} sub-quer{'y' if len(sub_qs) == 1 else 'ies'}): "
+            f"{sub_qs}",
+            file=sys.stderr,
+        )
+        new_chunks = []
+        for sub_query in sub_qs:
+            new_chunks.extend(retrieve(sub_query))
+        # Accumulate across retries rather than overwrite -- a retry that
+        # discards prior evidence and starts from scratch wastes the
+        # previous attempt's (expensive) retrieval entirely. dedupe()
+        # collapses re-fetched duplicates from repeating the original
+        # sub_queries. See decisions.md D-024 -- this was a real bug
+        # found in the first live run, not a pre-planned design choice.
+        combined = state.get("retrieved_chunks", []) + new_chunks
+        state["retrieved_chunks"] = dedupe(combined)
         return state
 
     def rerank_filter_node(state: ResearchState) -> ResearchState:
@@ -73,6 +86,20 @@ def build_graph(model: FathomModel, top_k: int = 8):
         # easier to reason about / log than a side effect buried in the
         # sufficiency judgment node.
         state["retry_count"] = state.get("retry_count", 0) + 1
+
+        # THE ACTUAL "refine sub_queries using gap" step from
+        # code_logic.md §4 -- see decisions.md D-024/D-025. Uses
+        # `refined_search_query` (short, query-shaped, from
+        # rag/sufficiency.py's dedicated schema field), NOT
+        # `sufficiency_gap` (human-readable prose, meant for the
+        # user-facing caveat only). B-006: the first version of this fix
+        # appended the raw prose gap as a "query," which sent full
+        # sentences to search APIs and made retrieval worse, not better.
+        refined_query = state.get("refined_search_query")
+        if refined_query:
+            existing = state.get("sub_queries", [])
+            if refined_query not in existing:
+                state["sub_queries"] = existing + [refined_query]
         return state
 
     def synthesis_node(state: ResearchState) -> ResearchState:

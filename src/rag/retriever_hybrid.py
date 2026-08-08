@@ -44,10 +44,10 @@ def retrieve(
             # handles the case where too many sources failed.
             continue
 
-    return _dedupe(all_chunks)
+    return dedupe(all_chunks)
 
 
-def _dedupe(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+def dedupe(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
     """Drop chunks with identical (source, content) pairs -- different
     tools sometimes surface the same underlying article/page. Keeps the
     first occurrence, which preserves tool-list order (web -> news ->

@@ -544,5 +544,96 @@ function testing — but still stub-based; the real model + real network
 combination for the full agentic path is NOT yet verified, same pattern
 as every prior phase.
 
+### D-024 — Phase 5 real-hardware run: correct end result, but exposed a genuine retry-loop bug
+**Phase:** 5, real verification
+**Finding:** first live agentic run (comparison query) completed in
+444.1s and produced a correct, honest answer — it recognized the
+sources had no fission-reactor data and said so explicitly rather than
+fabricating a comparison, and the retry cap/gap-surfacing mechanics
+worked exactly as designed. But inspecting *why* it never found
+fission-related evidence revealed a real bug: see `debug.md` B-005 —
+retries were silently re-running identical sub-queries and discarding
+prior evidence each time, so the 3 "attempts" shown in the stage output
+weren't actually searching for anything new. The end result was correct
+by luck of honest refusal, not because the retry mechanism was doing
+its job.
+**Why this matters more than a typical bug:** at ~150s+ per retrieval/
+sufficiency round trip (per D-022's accepted cost), a retry loop that
+doesn't actually refine its search is close to pure wasted time —
+exactly the kind of cost this project can least afford to spend
+pointlessly, given the latency situation is already accepted as a
+real, known constraint.
+**Fixed:** see B-005 for the full fix (evidence accumulation across
+retries + gap-based sub_query refinement, both previously documented in
+`code_logic.md` §4 but never actually implemented in `rag/graph.py`).
+**Files touched:** see B-005.
+**Verification:** full 65/65 regression sweep across all five test
+files, including a new test specifically targeting this bug that would
+have failed against the pre-fix code.
+**Still open:** the fixed version has NOT yet been run on real
+hardware — only the original buggy version has real-world confirmation
+so far. Next real run should re-test the same fusion-vs-fission-style
+comparison query to confirm the fix actually finds better evidence on
+retry, not just that the mechanics run without erroring.
+
+### D-025 — Second real-hardware run exposed a second, worse retry bug (B-006)
+**Phase:** 5, third real verification round
+**Finding:** the same comparison query, re-run after D-024/B-005's fix,
+proved the fix's mechanics worked exactly as designed (sub_queries
+genuinely grew: 2 → 3 → 4 across attempts; evidence accumulated as
+intended) — but the answer quality got worse, not better, because the
+"refined" sub-query being added was raw prose (the sufficiency gap
+explanation) sent verbatim to search APIs, not an actual search term.
+See `debug.md` B-006 for the full root cause and fix.
+**Pattern worth naming explicitly:** two real bugs in a row have now
+come from the same underlying habit — treating a human-readable
+explanation field as if it were usable machine input (B-005's version
+reused `gap` as a retry signal at all without checking its shape; B-006
+is the sharper version of the same mistake, reusing prose as a literal
+API query string). The fix isn't just patching this instance — it's
+splitting the schema so a prose field and a machine-usable field can
+never be confused again, plus a structural length-based rejection as a
+backstop rather than trusting a prompt instruction alone.
+**Decision:** fixed per B-006. Not reverting D-024's core insight
+(retries need to actually refine, not just repeat) — refining the fix
+rather than abandoning the approach.
+**Files touched:** see B-006.
+**Verification:** 67/67 full regression sweep. Real-hardware
+confirmation of THIS fix is still outstanding — same "verified in
+sandbox, not yet on real hardware" gap as every fix in this thread so
+far.
+
+### D-026 — Third real-hardware run: B-006's fix was safe but silently inert on this local model
+**Phase:** 5, fourth real verification round
+**Finding:** re-running the same query with B-006's fix showed real
+progress — no prose sentences sent as queries this time, confirming the
+length-guard works. But sub_queries stayed at exactly 2 across all 3
+attempts (no `[flags: ...]` line printed either), meaning the model was
+returning an EMPTY `search_query` on this local Qwen3-4B setup despite
+the prompt explicitly instructing it to always provide one when
+insufficient. Net effect: retries were safe (no garbage sent) but
+silently non-functional again — a quieter recurrence of B-005's
+original problem, just without B-006's actively-harmful version.
+**Decision:** rather than spend another full LLM call chasing better
+prompt compliance (directly costly per D-022's accepted-but-real
+per-call price), added a bounded, LLM-free fallback:
+`_fallback_query_from_gap()` extracts keywords from the prose `gap`
+field via simple stopword filtering, capped at the same 8-word limit
+the primary path is validated against. Verified directly against the
+actual `gap` text from this real run — it produces a genuinely usable
+query ("recent progress fusion energy advances next-generation fission
+reactor"), not a synthetic test fixture.
+**Pattern continuation:** this is the third fix in a row on the same
+retry-refinement mechanism (B-005 → B-006 → this). Each real run has
+surfaced a real, different failure mode the prior fix didn't anticipate.
+Noted plainly rather than treating "the tests are green" as sufficient
+confidence at any point in this sequence — it wasn't, twice.
+**Files touched:** `src/rag/sufficiency.py` (fallback function,
+strengthened prompt with an explicit example and a "never leave
+search_query empty" instruction), `test_phase5_manual.py` (new
+regression test using the real-world gap text verbatim).
+**Verification:** 68/68 full regression sweep. Real-hardware
+confirmation of this fix specifically is, again, still outstanding.
+
 ---
 **Return to `/context.md` for next steps.**

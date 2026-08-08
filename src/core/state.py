@@ -62,7 +62,12 @@ class ResearchState(TypedDict, total=False):
 
     # -- curation / sufficiency (rag/curator.py, rag/sufficiency.py) --
     sufficiency: bool
-    sufficiency_gap: str | None
+    sufficiency_gap: str | None  # human-readable explanation, for the
+    # user-facing caveat -- NOT used as a search query (see B-006)
+    refined_search_query: str | None  # short, query-shaped string for
+    # re-retrieval on the next attempt, kept separate from
+    # sufficiency_gap's prose so a retry never sends a full sentence to
+    # a search API
     retry_count: int
 
     # -- synthesis (rag/synthesis.py) --
@@ -92,6 +97,7 @@ def new_state(original_query: str) -> ResearchState:
         retrieved_chunks=[],
         sufficiency=False,
         sufficiency_gap=None,
+        refined_search_query=None,
         retry_count=0,
         answer="",
         citations=[],

@@ -5,7 +5,7 @@ import tools  # noqa: F401 -- registers all built-in tools, see tools/__init__.p
 
 from tools.registry import register_tool, dispatch, list_tools
 from tools.vector_store import CuratedStore
-from rag.retriever_hybrid import _dedupe
+from rag.retriever_hybrid import dedupe
 from rag.reranker import rerank
 from core.state import RetrievedChunk
 from datetime import datetime, timezone, timedelta
@@ -60,7 +60,7 @@ chunks = [
     RetrievedChunk(source_id="b", content="same text", source="Source A", url=None, date=None, relevance_score=1.0),
     RetrievedChunk(source_id="c", content="different text", source="Source A", url=None, date=None, relevance_score=1.0),
 ]
-deduped = _dedupe(chunks)
+deduped = dedupe(chunks)
 check("dedupe drops exact (source, content) duplicates", len(deduped) == 2)
 
 # --- Test 4: reranker recency boost ---
