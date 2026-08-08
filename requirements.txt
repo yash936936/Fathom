@@ -1,0 +1,5 @@
+# Phase 1 -- core model backend only. Later phases add: langgraph,
+# rank-bm25 or equivalent, sentence-transformers/cross-encoder for
+# reranking, nemoguardrails, etc. -- add them in the phase that needs
+# them, not preemptively (see workflow.md §2 scope discipline).
+llama-cpp-python>=0.3.0
