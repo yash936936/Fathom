@@ -217,5 +217,104 @@ launch or domain registration.
 done; full model-load/generation verification deferred to a real dev
 machine per that entry's follow-up note.
 
+### D-013 — Phase 2 ships a lightweight custom guardrail, not NeMo Guardrails
+**Phase:** 2
+**Decision:** `core/guardrail.py` implements input/output rails as plain
+regex heuristics and structural checks, with no external dependency —
+NOT the NeMo Guardrails integration `trd.md` §5 names as the target
+framework.
+**Rationale:** This is an explicit, logged deviation from `trd.md`, not a
+silent one (per `workflow.md` §5 conflict-resolution rule). NeMo
+Guardrails is a real dependency with its own config/Colang layer; adding
+it before there's eval data showing the lightweight version is
+insufficient would be the same premature-dependency mistake flagged in
+D-012 point 4. The control-flow principle D-009 actually requires (a
+classifier gate that runs before spend, not prompt-only enforcement) is
+fully satisfied by `core/domain_gate.py` regardless of which library
+backs `guardrail.py`.
+**Revisit condition:** if Phase 2's eval-set testing (once Phase 1 is
+confirmed and a golden set exists) shows the regex-based injection
+detection has a meaningful false-negative rate that NeMo Guardrails'
+more sophisticated detection would close, swap the implementation behind
+`input_rail()`/`output_rail()`'s existing function signatures — callers
+in `main.py`/`router.py` shouldn't need to change.
+**Files touched:** `src/core/guardrail.py`.
+**Verification:** see `debug.md` B-002, B-003 — two real bugs found and
+fixed via `test_phase2_manual.py`'s stubbed-model test harness (13/13
+passing after fixes), plus a manual false-positive spot-check against
+three realistic in-domain queries.
+
+### D-014 — Started Phase 2 before Phase 1 exit criteria were confirmed
+**Phase:** 2
+**Decision:** Proceeded to Phase 2 on explicit user instruction ("Phase
+2"), despite `workflow.md` §4's phase-transition rule stating Phase N+1
+shouldn't start until Phase N's exit criteria are confirmed met — Phase
+1 remains blocked on real-hardware verification (see `debug.md` B-001,
+`status.md` Entry 004).
+**Rationale:** This is a deliberate, informed override by the user, not
+an agent decision to skip the rule. Logged per `workflow.md`'s own
+guidance that scope/process deviations get logged, not silently applied.
+Phase 2's code (`domain_gate.py`, `guardrail.py`) has no runtime
+dependency on Phase 1's unresolved verification gap — it depends on
+`FathomModel`'s interface (which is stable/tested), not on the model
+actually being loadable in this sandbox — so the work itself isn't
+blocked, only the "is Phase 1 truly done" confirmation is.
+**Follow-up:** when Phase 1 is verified on real hardware, also run
+Phase 2's `classify_domain()` against the real model (not the stubbed
+one in `test_phase2_manual.py`) before treating Phase 2 as verified —
+the stub only proves the parsing/control-flow logic, not that the real
+Qwen3-4B model actually produces classifications matching the expected
+JSON shape reliably.
+
+### D-015 — Real-hardware verification: correctness confirmed, latency fails trd.md targets
+**Phase:** 1/2 (verification)
+**Finding:** User ran `verify_real_model.py` on real hardware (Windows,
+Git Bash/MINGW64). Correctness results are good: model loads and
+generates coherent output; `classify_domain()` hit 5/5 on a real-model
+smoke test (confidence 0.95–0.99) including correctly catching an
+injection-style query. This closes the D-014 follow-up condition — Phase
+2's logic is no longer stub-only-verified.
+**Problem:** Performance fails `trd.md`'s stated latency targets outright,
+not marginally. Measured: model load 68.2s; generation ~2 tokens/second
+(46.6s for a ~40-token reply). A single domain-gate call alone would
+exceed the entire fast-path 5s budget before any retrieval or synthesis
+even starts.
+**Decision:** Do not proceed to Phase 3 (tools/retrieval) until this is
+diagnosed — building a RAG pipeline on top of ~2 tok/s inference would
+compound the problem, not reveal anything new about it. Most likely
+cause: the `pip install llama-cpp-python` wheel installed without
+CPU-specific SIMD acceleration (AVX2/AVX-512) for the user's hardware,
+which is a common default on Windows pip installs. Not yet confirmed —
+this is a hypothesis to test, not a diagnosis.
+**Next action:** user to run a CPU capability check and reinstall
+llama-cpp-python with explicit acceleration flags if AVX2 is available
+but unused; report back before Phase 3 starts.
+**Files touched:** none yet — diagnosis first, code changes (if any,
+e.g. adjusting `n_threads`/`n_ctx` defaults in `llm_backend.py`) come
+after root cause is confirmed, not before.
+
+### D-016 — D-015's SIMD hypothesis was wrong; root cause still open
+**Phase:** 1/2 (verification, continued)
+**Finding:** User's verbose model-load output confirms full SIMD
+acceleration is active: `AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 |
+AVX512 = 1 | REPACK = 1`, with weight repacking (`q4_K_8x8`) also
+engaged, and `os.cpu_count()` correctly reports 8 threads. D-015's
+hypothesis (missing SIMD in the pip wheel) is therefore ruled out —
+logged here rather than silently dropped, since a wrong hypothesis is
+still a useful data point for whoever debugs this next.
+**Still unexplained:** ~0.9 tok/s generation is roughly 10-20x slower
+than expected for a 4B Q4 model with this hardware profile. Root cause
+not yet identified.
+**Decision:** Still holding Phase 3 until this is isolated — proceeding
+now would mean building and tuning the RAG/tool layer against an
+unexplained, likely-artificial performance ceiling. Next diagnostic
+steps handed to the user: (1) close VS Code / other CPU-competing
+processes and re-test from a plain terminal, (2) confirm Windows power
+plan is not throttling (Balanced/Power saver/on-battery), (3) if neither
+resolves it, test whether Windows Defender real-time scanning is
+interfering with the large mmap'd model file during inference.
+**Files touched:** none — still diagnosis-only, no code changes made in
+response to an unconfirmed root cause.
+
 ---
 **Return to `/context.md` for next steps.**

@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/dist/
+build/*.spec
+
+# --- Model weights (per decisions.md D-008 -- never committed, always
+# downloaded at install/runtime; also just too large for git) ---
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# --- Runtime model cache dirs (mirrors core/llm_backend.py
+# default_model_dir()) if ever created inside the repo during dev ---
+.fathom/
+
+# --- PyInstaller build output (build/ scripts stay tracked, their
+# output does not) ---
+*.spec
+*.exe
+*.dmg
+*.pkg
+
+# --- OS/editor cruft ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# --- Test/eval scratch ---
+.coverage
+htmlcov/
+
+# --- Env/secrets (no API keys expected per trd.md, but don't tempt fate) ---
+.env
+.env.*
