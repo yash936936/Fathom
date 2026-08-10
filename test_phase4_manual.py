@@ -68,6 +68,32 @@ answer, citations = generate("some query", [], _ShouldNotBeCalled())
 check("zero chunks -> explicit refusal without calling the model", "wasn't able to find any sources" in answer)
 check("zero chunks -> empty citations", citations == [])
 
+# --- D-028 regression: truncation smoothing against real observed output ---
+from rag.synthesis import _smooth_truncation
+
+real_truncated = (
+    "Fusion energy is a potential method of electric power generation from heat "
+    "released by nuclear fusion reactions [web:0]. Replicating this process on "
+    "Earth could provide virtually limitless clean energy [web:2]. The U"
+)
+smoothed = _smooth_truncation(real_truncated)
+check(
+    "truncated mid-word fragment is dropped, not shown to the user",
+    smoothed.endswith("[web:2].") and "The U" not in smoothed,
+)
+
+real_complete = "What we see as light is the result of a fusion reaction in the Sun [web:4]."
+check(
+    "already-complete answer passes through unchanged",
+    _smooth_truncation(real_complete) == real_complete,
+)
+
+no_sentence_at_all = "Fusion energy is the proc"
+check(
+    "truncation with zero complete sentences is marked, not silently shown",
+    "[response cut short]" in _smooth_truncation(no_sentence_at_all),
+)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

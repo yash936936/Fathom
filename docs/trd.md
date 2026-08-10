@@ -53,17 +53,28 @@
 
 ## 6. Non-functional requirements
 - **Latency:** REVISED per decisions.md D-022, based on real Phase 4
-  measurement (375.7s for one fast-path query on reference CPU hardware —
-  not an anomaly, see D-022's correction of the earlier D-015/D-016
-  hypothesis). Original targets (<5s fast path / <20s agentic) are
+  measurement — Fathom is scoped as a research tool where a multi-minute
+  wait for a thorough, cited answer is acceptable, not an interactive
+  chat tool. Original targets (<5s fast path / <20s agentic) are
   superseded, not achievable on the stated CPU-only/<6GB hardware profile
-  with the current model. Fathom is scoped as a research tool where a
-  multi-minute wait for a thorough, cited answer is acceptable — not an
-  interactive chat tool. No hard latency ceiling is enforced in v1;
-  `main.py`'s streaming output (D-021) exists specifically so a slow
+  with the current model.
+  **Revised further per D-029:** treat all logged timings as samples
+  from a WIDE, poorly-understood distribution, not a stable baseline.
+  Observed range on the reference machine for the same simple query,
+  same mode: 139s-3277s (roughly 23x spread), with no externally
+  observed cause for the outlier (confirmed directly with the user — no
+  sleep/lock, no other heavy programs, nothing noticed). Root cause of
+  the variance is NOT identified. Leading unconfirmed candidates:
+  intermittent antivirus/Defender real-time-scan interference with the
+  resident (non-mmap'd, per D-017) model memory, OS background tasks,
+  or power/thermal throttling not tied to a visible cause — none tested.
+  No hard latency ceiling is enforced in v1; `main.py`'s streaming
+  output (D-021) and the spinner (D-027) exist specifically so a slow
   answer is visibly progressing rather than indistinguishable from a
-  hang. Revisit only if a future eval shows latency is actually driving
-  users away, with real usage data, not a pre-set number.
+  hang — this matters more given the variance just confirmed, not less.
+  Revisit the variance question if it recurs with enough data to
+  actually investigate (e.g. Task Manager CPU/Defender activity captured
+  during a slow run), not by guessing further without a measurement.
 - **Reliability:** no silent hallucination fallback — retrieval failure must
   produce an explicit refusal, never a parametric-memory guess presented as
   grounded.

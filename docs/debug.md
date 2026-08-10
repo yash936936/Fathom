@@ -220,5 +220,26 @@ once (the original schema instruction) and wasn't sufficient.
 produces a genuinely usable 8-word-or-fewer query. Full regression
 sweep: 68/68. Real-hardware re-confirmation still outstanding.
 
+### B-008 — Quick mode's answer truncated mid-word with no graceful handling
+**Phase:** UX feature, first real-hardware run
+**Symptom:** `py src/main.py "What is fusion energy?" --mode quick`
+produced an answer ending in "...The U" — cut off mid-word.
+**Root cause:** `QUICK_MODE_MAX_TOKENS=120` is a hard cap with no
+sentence-boundary awareness -- `model.chat()`'s `max_tokens` parameter
+stops generation the instant the token budget is exhausted, regardless
+of whether that lands mid-sentence or even mid-word.
+**Fix:** see `decisions.md` D-028 -- `rag/synthesis.py`'s new
+`_smooth_truncation()` trims back to the last complete sentence when the
+raw answer doesn't end cleanly, applied before citation extraction.
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`.
+**Verification:** fix tested directly against the real truncated text
+from this exact run (correctly drops "The U") and against a real
+complete answer from the same session (passes through byte-for-byte
+unchanged, confirming no risk of corrupting already-correct output).
+87/87 full regression sweep.
+
+**Closure update:** re-confirmed on real hardware with two more quick-mode
+runs — both ended on complete sentences, no truncation. B-008 is closed.
+
 ---
 **Return to `/context.md` for next steps.**

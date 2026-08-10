@@ -12,6 +12,7 @@ See docs/code_logic.md §1 for the pseudocode this implements.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from core.llm_backend import FathomModel
@@ -134,3 +135,29 @@ def check_domain(state: ResearchState, model: FathomModel) -> ResearchState:
 
     state["domain_ok"] = True
     return state
+
+
+# Heuristic, LLM-call-free off-domain signals for quick mode -- see
+# decisions.md D-027. Deliberately narrow: only catches clear-cut
+# off-domain requests (coding, creative writing, roleplay/persona
+# hijacking). Anything not matched here fails OPEN (treated as
+# in-domain) rather than closed -- a heuristic false negative here just
+# means an off-domain request slips through to get a (probably useless,
+# ungrounded-refusal) answer; a heuristic false positive would incorrectly
+# block a legitimate research question, which is the worse failure mode
+# for a research tool. The full LLM-based classify_domain() above remains
+# the accurate, default check for deep-research mode.
+_QUICK_OFF_DOMAIN_PATTERNS = [
+    re.compile(r"\b(write|generate|debug|fix)\s+(me\s+)?(a\s+|some\s+)?(python|javascript|java|c\+\+|code|script|function|program)\b", re.I),
+    re.compile(r"\bwrite\s+(me\s+)?(a\s+)?(poem|story|song|lyrics|haiku)\b", re.I),
+    re.compile(r"\b(pretend|act as if|you are now|roleplay as)\b", re.I),
+]
+
+
+def quick_domain_check(query: str) -> bool:
+    """Returns True (assume in-domain) unless the query clearly matches
+    one of the off-domain heuristic patterns above. No LLM call -- used
+    only in quick mode where the domain-gate LLM call itself is one of
+    the two dominant costs being cut. See decisions.md D-027.
+    """
+    return not any(pattern.search(query) for pattern in _QUICK_OFF_DOMAIN_PATTERNS)

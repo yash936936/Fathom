@@ -38,7 +38,8 @@ fathom/
 │   │   ├── domain_gate.py         # research-domain classifier (guardrail entrypoint)
 │   │   ├── guardrail.py           # NeMo Guardrails config + input/output rail hooks
 │   │   ├── llm_backend.py         # llama-cpp-python wrapper around Qwen3-4B GGUF
-│   │   └── state.py               # ResearchState TypedDict — shared state object
+│   │   ├── state.py               # ResearchState TypedDict — shared state object
+│   │   └── ui.py                  # spinner / stage-reporter (D-027)
 │   │
 │   ├── rag/
 │   │   ├── retriever_hybrid.py    # BM25 + dense retrieval, RRF fusion
@@ -99,6 +100,7 @@ fathom/
 | `core/guardrail.py` | Wraps NeMo Guardrails rails: input (injection/PII), output (safety, format) | `core/llm_backend.py` |
 | `core/llm_backend.py` | Single point of contact with Qwen3-4B GGUF via llama-cpp-python; all generation calls go through here | model file at runtime cache path |
 | `core/state.py` | Defines `ResearchState` — the typed object threaded through the LangGraph run | used by all `rag/` nodes |
+| `core/ui.py` | Terminal progress display: single-line spinner (default) vs per-stage log (`--verbose`); see `decisions.md` D-027 | used by `main.py`, threaded into `rag/graph.py` via a `report` callback |
 | `rag/retriever_hybrid.py` | BM25 + dense search, Reciprocal Rank Fusion | `tools/vector_store.py`, `tools/web_search.py` |
 | `rag/reranker.py` | Cross-encoder reranking of fused hybrid results | — |
 | `rag/planner.py` | Decomposes a research query into sub-questions + tool selection | `core/llm_backend.py` |

@@ -1,11 +1,28 @@
 """
 main.py — Fathom CLI entrypoint.
 
-Phase 4 scope (see docs/phases.md): full fast-path pipeline wired
-end-to-end -- domain gate -> router -> retrieve -> rerank -> synthesize
--> output guardrail. The agentic path (router classifies a query as
-"complex") is not yet implemented -- that's Phase 5's rag/graph.py.
-Phase 4's own exit criteria only require the fast path to work.
+Two modes (see docs/decisions.md D-027):
+  --mode deep  (default) -- full LLM-based domain check + adaptive
+               routing (fast or agentic path). Thorough, slow.
+  --mode quick -- heuristic domain check (no LLM call), always the fast
+               path regardless of query complexity, tight max_tokens cap.
+               Engineered to minimize cost as much as structurally
+               possible -- NOT a guaranteed <30s ceiling (this hardware's
+               measured ~1.7-2 tok/s makes a hard guarantee dishonest to
+               promise; see D-027 for the full reasoning).
+
+Output verbosity (--verbose / -v):
+  default (quiet) -- a single-line spinner shows the current stage,
+               fully cleared before anything else prints. Once done,
+               ONLY the answer, its note (if any), and sources print --
+               no stage log, no flags, no timing.
+  --verbose    -- IDENTICAL spinner-based UI during processing (see
+               decisions.md D-030 -- the old per-stage-log + live-token-
+               streaming behavior was removed per explicit user request;
+               it visually conflicted with the spinner writing to the
+               same terminal anyway). The only difference: after the
+               same clean answer + sources, an extra diagnostic footer
+               (flags + elapsed time) prints for debugging.
 """
 
 from __future__ import annotations
@@ -13,16 +30,26 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from typing import Callable
 
 import tools  # noqa: F401 -- registers built-in tools, see tools/__init__.py
-from core.domain_gate import DomainClassificationError, check_domain
+from core.domain_gate import (
+    REFUSAL_MESSAGE,
+    DomainClassificationError,
+    check_domain,
+    quick_domain_check,
+)
 from core.guardrail import input_rail, output_rail
 from core.llm_backend import ModelNotFoundError, get_model
 from core.router import route
 from core.state import new_state
+from core.ui import Spinner, make_stage_reporter
 from rag.reranker import rerank
 from rag.retriever_hybrid import retrieve
 from rag.synthesis import generate
+
+QUICK_MODE_MAX_TOKENS = 120  # tight cap -- see module docstring on why
+DEEP_MODE_MAX_TOKENS = 512
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,10 +59,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("query", nargs="?", help="A research question.")
     parser.add_argument(
+        "--mode",
+        choices=["quick", "deep"],
+        default="deep",
+        help="quick = fastest we can make it (heuristic domain check, "
+        "fast path only, short answer) -- not a guaranteed time limit. "
+        "deep = full accuracy (LLM domain check, adaptive routing). "
+        "Default: deep.",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="After the answer, also print flags and elapsed time for "
+        "debugging. Processing UI itself is unchanged (same spinner).",
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
-        default=512,
-        help="Max tokens for the final answer (default: 512).",
+        default=None,
+        help="Max tokens for the final answer. Default: 120 in quick "
+        "mode, 512 in deep mode.",
     )
     parser.add_argument(
         "--top-k",
@@ -46,111 +90,121 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_fast_path(query: str, model, max_tokens: int, top_k: int) -> tuple[str, list[str]]:
-    """Returns (message_to_print, guardrail_flags). Implements
-    code_logic.md §3's fast path exactly: retrieve -> rerank ->
-    synthesize -> structural output check. Phase 6's per-claim citation
-    verification and answerability pre-check are not wired in yet --
-    output_rail()'s structural check (citation tags present) is the only
-    grounding safeguard active at this phase.
+def run_query(
+    query: str,
+    model,
+    *,
+    mode: str,
+    max_tokens: int,
+    top_k: int,
+    report: Callable[[str], None],
+    stream_tokens: bool,
+) -> tuple[str, str, list[str], bool]:
+    """Returns (answer_text, sources_block, flags, already_streamed).
 
-    Prints progress to stderr at each stage -- per decisions.md D-021,
-    a silent multi-minute wait is indistinguishable from a hang at
-    current measured generation speeds. This does not fix the underlying
-    latency; it makes the wait legible instead of ambiguous.
+    `already_streamed` is True only when the fast path's synthesis ran
+    with live token streaming (verbose mode) -- the caller must not
+    print `answer_text` again in that case, it's already on stdout.
+
+    `report` is called with a short stage description at each step --
+    the caller decides whether that becomes a spinner update or a
+    printed line (see core/ui.py).
     """
     state = new_state(query)
 
     input_result = input_rail(query)
     if not input_result.passed:
         return (
-            "This request was flagged by input safety checks and can't "
-            "be processed.",
+            "This request was flagged by input safety checks and can't be processed.",
+            "",
             input_result.flags,
+            False,
         )
 
-    print("Checking request...", file=sys.stderr)
-    try:
-        state = check_domain(state, model)
-    except DomainClassificationError:
-        state["domain_ok"] = True
-        state.setdefault("guardrail_flags", []).append("domain_classifier_parse_failure")
+    report("Checking request")
+    if mode == "quick":
+        # No LLM call -- see decisions.md D-027. Heuristic, fails open.
+        state["domain_ok"] = quick_domain_check(query)
+        state["domain_confidence"] = None
+    else:
+        try:
+            state = check_domain(state, model)
+        except DomainClassificationError:
+            state["domain_ok"] = True
+            state.setdefault("guardrail_flags", []).append("domain_classifier_parse_failure")
 
     if not state["domain_ok"]:
-        from core.domain_gate import REFUSAL_MESSAGE
-
-        return (REFUSAL_MESSAGE, state.get("guardrail_flags", []))
+        return (REFUSAL_MESSAGE, "", state.get("guardrail_flags", []), False)
 
     state = route(state)
+    if mode == "quick":
+        # Quick mode never goes agentic, regardless of what the
+        # heuristic complexity classifier says -- the agentic path's
+        # multiple chained LLM calls are exactly the cost quick mode
+        # exists to avoid. See D-027.
+        state["path"] = "simple"
+
+    already_streamed = False
+
     if state["path"] == "complex":
-        print("Planning multi-step research...", file=sys.stderr)
+        report("Planning multi-step research")
         from rag.graph import run_agentic
 
-        final_state = run_agentic(query, model, top_k=top_k)
+        final_state = run_agentic(query, model, top_k=top_k, report=report)
         answer = final_state.get("answer", "")
-        citations = final_state.get("citations", [])
         chunks = final_state.get("retrieved_chunks", [])
+    else:
+        report("Searching sources")
+        retrieved = retrieve(query)
+        chunks = rerank(retrieved, top_k=top_k, requires_recency=state.get("requires_recency", False))
 
-        out_result = output_rail(answer, require_citations=bool(chunks))
-        flags = state.get("guardrail_flags", []) + out_result.flags
+        report(f"Generating answer from {len(chunks)} sources")
+        on_token = None
+        if stream_tokens:
+            print("", file=sys.stderr)  # blank line before streamed tokens start
 
-        if not out_result.passed:
-            return (
-                "[The answer failed output safety/quality checks -- this "
-                "usually means retrieved sources were insufficient. Treat "
-                "it with caution or try rephrasing.]",
-                flags,
-            )
+            def on_token(token: str) -> None:  # noqa: F811
+                print(token, end="", flush=True)
 
-        print(answer)
-        sources_note = ""
-        if chunks:
-            sources_note = "Sources:\n" + "\n".join(
-                f"  [{c['source_id']}] {c['source']}" + (f" - {c['url']}" if c.get("url") else "")
-                for c in chunks
-            )
-        return (sources_note, flags)
+            already_streamed = True
 
-    print("Searching sources...", file=sys.stderr)
-    chunks = retrieve(query)
-    ranked = rerank(chunks, top_k=top_k, requires_recency=state["requires_recency"])
+        answer, _citations = generate(query, chunks, model, max_tokens=max_tokens, on_token=on_token)
+        if stream_tokens:
+            print("\n", file=sys.stderr)
 
-    print(f"Generating answer from {len(ranked)} sources...", file=sys.stderr)
-    print("", file=sys.stderr)  # blank line before streamed tokens start
-
-    def _stream(token: str) -> None:
-        print(token, end="", flush=True)
-
-    answer, citations = generate(query, ranked, model, max_tokens=max_tokens, on_token=_stream)
-    print("\n", file=sys.stderr)  # separate streamed answer from the rest of the output
-
-    out_result = output_rail(answer, require_citations=bool(ranked))
+    out_result = output_rail(answer, require_citations=bool(chunks))
     flags = state.get("guardrail_flags", []) + out_result.flags
 
     if not out_result.passed:
         return (
-            "[The answer above failed output safety/quality checks -- "
-            "this usually means retrieved sources were insufficient. "
-            "Treat it with caution or try rephrasing.]",
+            "[The answer failed output safety/quality checks -- this "
+            "usually means retrieved sources were insufficient. Try "
+            "rephrasing.]",
+            "",
             flags,
+            False,
         )
 
-    sources_note = ""
-    if ranked:
-        sources_note = "Sources:\n" + "\n".join(
+    sources_block = ""
+    if chunks:
+        sources_block = "Sources:\n" + "\n".join(
             f"  [{c['source_id']}] {c['source']}" + (f" - {c['url']}" if c.get("url") else "")
-            for c in ranked
+            for c in chunks
         )
 
-    return (sources_note, flags)
+    return (answer, sources_block, flags, already_streamed)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if not args.query:
-        print('Fathom\nUsage: fathom "your research question"', file=sys.stderr)
+        print('Fathom\nUsage: fathom "your research question" [--mode quick|deep] [--verbose]', file=sys.stderr)
         return 1
+
+    max_tokens = args.max_tokens
+    if max_tokens is None:
+        max_tokens = QUICK_MODE_MAX_TOKENS if args.mode == "quick" else DEEP_MODE_MAX_TOKENS
 
     try:
         model = get_model()
@@ -159,16 +213,40 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     start = time.monotonic()
-    message, flags = run_fast_path(args.query, model, args.max_tokens, args.top_k)
-    elapsed = time.monotonic() - start
 
-    print(message)
-    if flags:
-        print(f"\n[flags: {', '.join(flags)}]", file=sys.stderr)
-    print(f"[{elapsed:.1f}s]", file=sys.stderr)
+    # Same clean single-line spinner UI in both quiet and verbose mode
+    # now -- per user request, verbose no longer prints a stage-by-stage
+    # log or streams tokens live (that combination visually conflicted
+    # with the spinner writing to the same terminal anyway). The ONLY
+    # difference --verbose makes now is an extra diagnostic footer
+    # (flags + elapsed time) after the clean answer, nothing during.
+    with Spinner() as spinner:
+        report = make_stage_reporter(verbose=False, spinner=spinner)
+        answer, sources_block, flags, _already_streamed = run_query(
+            args.query,
+            model,
+            mode=args.mode,
+            max_tokens=max_tokens,
+            top_k=args.top_k,
+            report=report,
+            stream_tokens=False,
+        )
+    # Spinner's __exit__ has already cleared the line by this point.
+    print(answer)
+    if sources_block:
+        print(sources_block)
+
+    if args.verbose:
+        # The only thing --verbose still adds: a diagnostic footer after
+        # the same clean output everyone else sees, not a different
+        # process display.
+        elapsed = time.monotonic() - start
+        if flags:
+            print(f"\n[flags: {', '.join(flags)}]", file=sys.stderr)
+        print(f"[{elapsed:.1f}s, mode={args.mode}]", file=sys.stderr)
+
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

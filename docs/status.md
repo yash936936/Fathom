@@ -7,23 +7,33 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 5 — Agentic path (LangGraph)
-- **Phase status:** Three real bugs found and fixed across three real
-  hardware runs of the SAME comparison query — the retry-refinement
-  mechanism has now been genuinely hardened by real-world scrutiny, not
-  just code review. Run 1 (B-005/D-024): retries repeated identical
-  searches and discarded prior evidence. Run 2 (B-006/D-025): the fix
-  for that sent raw prose sentences to search APIs as "queries." Run 3
-  (B-007/D-026): the fix for that was safe but the model often returns
-  an empty search_query despite being told not to — fixed with a
-  bounded, LLM-free keyword-extraction fallback, tested directly against
-  the real gap text from the live run. Full regression sweep: 68/68.
-- **NOT yet verified:** B-007's fix has not been run on real hardware.
-  Pattern held three times running now — do not treat a green test
-  suite as equivalent to a clean real run until it actually happens.
-- **Latency (accepted per D-022):** unchanged.
-- **Next phase:** Phase 6 — Hallucination/verification layer. Should not
-  start until the FIXED Phase 5 is confirmed on real hardware — the
+- **Active phase:** UX feature (quick/deep modes + spinner) — B-008
+  closed for real; a bigger open question surfaced (latency variance)
+- **Feature status:** All three modes confirmed working on real
+  hardware across multiple runs. B-008 (truncation) CLOSED — re-tested
+  twice more, both answers ended cleanly, no truncation. Full
+  regression: 87/87.
+- **Open, more important than B-008 was:** D-029 — the same simple
+  query, same mode, same machine, back-to-back runs measured 139.0s,
+  141.4s, and then 3277.0s (54.6 min) with nothing externally different
+  (confirmed directly with the user: no sleep, no other heavy programs,
+  nothing noticed). All prior latency figures (D-022's 375.7s baseline,
+  D-024-026's ~250-450s range) should now be read as samples from a
+  wide, poorly-understood distribution, not stable numbers. `trd.md` §6
+  updated to state this honestly. Root cause NOT identified — leading
+  unconfirmed candidate is intermittent Defender/antivirus interference
+  (raised as a hypothesis back in D-016, never actually tested).
+- **Still outstanding, unrelated:** B-007's Phase 5 retry-refinement fix
+  (fusion-vs-fission comparison query) still needs its own real-hardware
+  confirmation — untouched since the UX feature work started.
+- **Latency:** no longer treated as a stable ~375s baseline — see D-029.
+  Quick mode's actual speed also still unmeasured precisely (didn't
+  time it in the two confirmation runs), though it completed without
+  the earlier truncation issue.
+- **Next phase:** Phase 6 — Hallucination/verification layer, OR
+  finishing Phase 5's real-hardware confirmation first. Should not
+  start until BOTH the Phase 5 fix chain AND this UX feature are
+  confirmed on real hardware — the
   prior confirmation was of buggy behavior that happened to produce a
   correct-looking result.
 - **Blockers:** real-machine verification of the fixed `run_agentic()`
@@ -33,6 +43,108 @@
 ---
 
 ## Log (newest first)
+
+### Entry 015
+**Phase:** UX feature, refinement
+**Action taken:** simplified `--verbose` per direct user request — it
+now uses the identical spinner UI as default mode during processing,
+differing only in an added flags+timing footer after the same clean
+output. Also resolved a latent design conflict (spinner + live streaming
+writing to the terminal simultaneously) that the old verbose design
+would have hit.
+**Decisions logged this run:** D-030.
+**Debug entries logged this run:** none — clean refactor, 87/87 on
+first pass.
+**Feature exit criteria met?** Code-complete, unit-verified, help text
+and error paths manually re-checked. NOT yet verified on real hardware.
+**Next action for next session:** confirm `--verbose` on real hardware
+shows the spinner (not stage-by-stage lines) followed by the flags/
+timing footer. Still separately outstanding: B-007's Phase 5 fix
+real-hardware confirmation, and the D-029 latency-variance investigation
+whenever it next recurs.
+
+### Entry 014
+**Phase:** UX feature, second real-hardware confirmation
+**Action taken:** re-ran quick mode twice more — both times the
+truncation fix held, answers ended on complete sentences. Closed B-008.
+While confirming this, noticed a `--verbose` run of the identical query
+took 3277.0s vs. 139-141s for the same query moments earlier. Asked the
+user directly whether anything external explained it (sleep, other
+programs) — answer was no, nothing unusual noticed. Rather than treat
+this as a one-off to ignore, documented it as a real, unexplained
+variance finding and revised `trd.md` §6 to stop presenting D-022's
+375.7s as a stable baseline.
+**Decisions logged this run:** D-029 — full variance finding, candidate
+causes (none confirmed), and a concrete low-effort next step (check
+Task Manager CPU/Defender activity next time it recurs) rather than
+guessing further without evidence.
+**Debug entries logged this run:** B-008 marked closed in `debug.md`.
+**Feature exit criteria met?** Yes for the mode/UI feature itself
+(truncation fix confirmed twice, spinner/quiet-mode contract already
+confirmed in Entry 013). The latency-variance question is now its own
+open item, separate from the feature being "done."
+**Next action for next session:** two independent open items, either
+order: (1) B-007's Phase 5 retry-refinement real-hardware confirmation
+(fusion-vs-fission query, untouched since Entry 012), (2) if a future
+slow run happens again, capture Task Manager's Performance tab during
+it (CPU%, and specifically whether an antivirus/Defender process shows
+sustained activity) — first real evidence toward the D-029 variance
+question, rather than another unexplained data point.
+
+### Entry 013
+**Phase:** UX feature, first real-hardware verification
+**Action taken:** ran all three modes for real (default quiet, quick,
+verbose). Quiet mode's output contract confirmed correct. Caught a real
+bug myself in quick mode's output (mid-word truncation) rather than
+waiting for it to be reported — fixed with `_smooth_truncation()` in
+`rag/synthesis.py`, verified against the exact real truncated text from
+the run.
+**Decisions logged this run:** D-028 — full finding writeup (positive
+confirmation + the truncation bug + fix + scoping note about verbose
+mode's live streaming not being retroactively fixable).
+**Debug entries logged this run:** B-008 — root cause + fix.
+**Feature exit criteria met?** Mostly — core mode/spinner behavior
+confirmed on real hardware. The truncation fix itself hasn't had its
+own second real-run confirmation yet. 87/87 regression sweep.
+**Next action for next session:** re-run `--mode quick` once more to
+confirm the truncation fix actually produces a clean sentence ending in
+practice, not just against the replayed fixture text. Separately, still
+owed from Entry 011: B-007's Phase 5 retry-refinement fix real-hardware
+confirmation (the fusion-vs-fission comparison query) — this hasn't been
+revisited since this UX feature work started.
+
+### Entry 012
+**Phase:** UX feature (quick/deep modes, spinner, verbose flag)
+**Action taken:** built the mode/UI feature requested: `--mode
+{quick,deep}`, `--verbose`/`-v`, `core/ui.py`'s `Spinner` +
+`make_stage_reporter()`, `core/domain_gate.py`'s new
+`quick_domain_check()` heuristic, `rag/graph.py` refactored to take an
+injected `report` callback, `main.py` fully rewritten around
+`run_query()`. Was explicit with the user that a guaranteed <30s quick
+mode isn't achievable on this hardware (measured ~1.7-2 tok/s) rather
+than building something that silently doesn't meet its own advertised
+number — quick mode instead minimizes every avoidable cost (no
+domain-gate LLM call, forced fast path, tight token cap).
+**Decisions logged this run:** D-027 — full design + honesty framing
+around the <30s claim, spinner/reporter architecture, quiet-mode output
+contract (answer + sources only, matching the explicit user spec).
+**Debug entries logged this run:** none — clean implementation, 84/84
+first-pass regression sweep with zero breakage in existing behavior.
+**Feature exit criteria met?** Code-complete and unit/logic verified
+(spinner thread lifecycle, reporter wiring, quick-check heuristics, CLI
+arg parsing, error paths). NOT verified: an actual real-hardware run in
+quick mode or with the spinner visibly rendering — same "write it,
+verify what's verifiable locally, then need real confirmation" pattern
+as every other feature in this project.
+**Next action for next session:** get real-hardware output for (1)
+`py src/main.py "<query>" --mode quick` — confirm timing and that the
+heuristic domain check behaves sensibly on a real query, (2) default
+quiet mode on a normal query — confirm the spinner renders/clears
+correctly in an actual terminal (this can behave differently across
+terminal emulators in ways a test harness can't catch), (3) `--verbose`
+still matches the old pre-this-change behavior exactly. Also still
+outstanding from Entry 011: Phase 5's B-007 fix real-hardware
+confirmation.
 
 ### Entry 011
 **Phase:** 5, third bug fix in the same retry-refinement mechanism

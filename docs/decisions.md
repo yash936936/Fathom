@@ -635,5 +635,164 @@ regression test using the real-world gap text verbatim).
 **Verification:** 68/68 full regression sweep. Real-hardware
 confirmation of this fix specifically is, again, still outstanding.
 
+### D-027 — Two modes (quick/deep) + spinner UI + verbose flag
+**Phase:** UX feature, post-Phase 5
+**Decision:** Added `--mode {quick,deep}` (default `deep`, preserving
+all existing behavior unchanged) and `--verbose`/`-v` (default off).
+**Quick mode, honestly scoped:** user asked for "responds in less than
+30 seconds." Given this hardware's measured ~1.7-2 tok/s (D-022), a
+single unconstrained LLM call routinely already takes 60-90+ seconds —
+a hard <30s guarantee isn't achievable and I said so rather than
+building something that silently fails to meet its own advertised
+promise. What quick mode actually does: cuts the domain-gate LLM call
+entirely (replaced by `core/domain_gate.py`'s new `quick_domain_check()`
+— a heuristic pattern matcher, fails open to in-domain on anything not
+clearly a coding/creative/roleplay request), always forces the fast
+path regardless of the router's complexity classification (skips the
+agentic path's multiple chained calls entirely), and caps output at 120
+tokens (`QUICK_MODE_MAX_TOKENS`) vs deep mode's 512. This is "minimize
+every avoidable cost," not "guarantee a time," and the CLI help text
+and code comments say so explicitly rather than implying a promise.
+**Spinner UI (`core/ui.py`, new):** a background-threaded single-line
+spinner (`Spinner` class) that repaints one terminal line while blocking
+LLM/retrieval calls run on the main thread, fully erased on exit — this
+satisfies "remove any and all processing text when the final answer is
+generated." `make_stage_reporter()` returns either a spinner-updating
+callback (quiet/default) or a print-per-line callback (verbose) with the
+same call signature, so `rag/graph.py` and `main.py`'s pipeline code
+don't need to know which mode they're in — they just call `report(msg)`.
+**`rag/graph.py` changed:** node closures now call an injected `report`
+callback instead of hardcoded `print(..., file=sys.stderr)` — required
+so the agentic path's stage updates also route through the spinner in
+quiet mode, not just the fast path.
+**Verbose mode preserves old behavior exactly:** one line per stage
+(D-021/D-023's original design) plus live token streaming for the fast
+path's synthesis call (streaming is NOT added to the agentic path in
+this change — that gap, already noted in D-023, remains open).
+**Quiet mode's output contract, per explicit user spec:** ONLY the
+answer (which already embeds the "[Note: ...]" caveat text when the
+retry cap was exhausted, per D-024's synthesis_node behavior), then the
+sources block. No stage log, no flags, no timing — verbose mode is
+where those live now.
+**Files touched:** `src/core/ui.py` (new), `src/core/domain_gate.py`
+(added `quick_domain_check()`), `src/rag/graph.py` (report callback
+threading), `src/main.py` (full rewrite: mode/verbose flags, quiet-mode
+spinner wiring, verbose-mode behavior preserved), `test_phase_modes_ui.py`
+(new).
+**Verification:** full regression sweep, 84/84 across all six test
+files (13+11+17+16+11+16) — zero regressions from the `graph.py`/
+`domain_gate.py` changes. New tests specifically confirm: quick-check
+heuristics correctly distinguish coding/creative/roleplay requests from
+research questions and fail open on ambiguous cases; the spinner thread
+genuinely starts/stops and cleans up; both reporter modes wire correctly;
+CLI argument defaults and shorthand flags parse correctly. Manually
+re-verified the CLI's error paths (missing model, no query, `--help`)
+still behave correctly after the full `main.py` rewrite. NOT yet
+verified: an actual real-hardware run in both quick and verbose modes —
+same pattern as every feature in this project so far, real confirmation
+still needed before treating this as done.
+
+### D-028 — First real-hardware run of the mode/UI feature: quiet mode confirmed correct, caught a real truncation bug myself
+**Phase:** UX feature, first real verification
+**Finding, positive:** ran all three modes (default quiet, `--mode
+quick`, `--verbose`) on real hardware. Quiet mode worked exactly as
+specified — only answer + sources printed, confirmed by direct contrast
+with the `--verbose` run immediately after it showing the stage lines
+that were correctly absent from the quiet run. Every citation across all
+three runs resolved to a real listed source, zero fabricated IDs.
+**Finding, a real bug caught before the user had to report it:**
+quick mode's answer ended mid-word ("...The U") — `QUICK_MODE_MAX_TOKENS`
+(120) cut generation off mid-sentence with no graceful handling, which
+reads as broken output even though it's really just an unhandled
+consequence of the hard cap.
+**Fix:** added `rag/synthesis.py`'s `_smooth_truncation()` — if the raw
+answer doesn't end on sentence-terminal punctuation, trim back to the
+last complete sentence rather than showing a dangling fragment; if
+there's no complete sentence at all (cut off very early), mark it
+explicitly (`"[response cut short]"`) instead of silently presenting a
+fragment as if it were the whole answer. Applied before citation
+extraction, so a citation tag half-cut-off by truncation is never
+included either.
+**Scoping note, stated plainly:** this fixes the *returned* text (what
+quiet mode shows, and what citation extraction operates on). It does
+NOT retroactively fix `--verbose` mode's live token streaming — if
+truncation happens there, the raw fragment was already printed to the
+terminal character-by-character before smoothing could run. Acceptable
+since verbose is explicitly the raw-debug view and the bug was actually
+observed in quiet mode, where the fix fully applies.
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`
+(3 new regression tests, verified directly against the real truncated
+and real complete text from this exact run, not synthetic fixtures).
+**Verification:** 87/87 full regression sweep across all six test files.
+Fix verified byte-for-byte against the real observed truncated output
+(correctly drops "The U", preserves everything before it) and confirmed
+a real complete answer passes through completely unchanged (zero risk
+of the fix corrupting already-correct output).
+
+### D-029 — B-008 closed for real; discovered latency has much higher variance than assumed
+**Phase:** UX feature, second real-hardware confirmation
+**B-008 closure:** re-ran quick mode twice more on real hardware — both
+answers ended on complete, well-formed sentences with no truncation.
+The fix is genuinely confirmed, not just passing synthetic tests.
+**New finding, more important than the fix confirmation:** the same
+`--verbose` command, same simple query ("What is fusion energy?"), same
+machine, run immediately after two deep-mode runs that took 139.0s and
+141.4s respectively, took **3277.0s (54.6 minutes)** — roughly a 23x
+jump with no change in query, mode, or (per the user, asked directly)
+anything externally unusual (no sleep/lock, no other heavy programs
+running, nothing noticed).
+**What this means:** every latency figure logged so far (D-022's 375.7s,
+D-024 through D-026's ~250-450s range) was treated as a representative
+baseline. It isn't -- it's one sample from a distribution with far more
+spread than assumed. `trd.md` §6 updated to state this as a range with
+high variance, not a point estimate, and to flag that the variance
+itself is unexplained, not just the absolute speed.
+**Root cause: NOT investigated further this session.** Real candidates,
+none confirmed: Windows Defender real-time scanning intermittently
+competing for CPU/disk during the model's large memory-mapped-turned-
+resident (`use_mmap=False`, D-017) access pattern -- this was raised as
+a hypothesis back in D-016 and never actually tested; OS-level
+background tasks (Windows Update, search indexing) that wouldn't
+register to the user as "a heavy program running"; intermittent thermal/
+power-plan throttling not tied to a visible cause. Explicitly not
+guessing further without a real measurement.
+**Decision:** document the variance honestly rather than let it sit
+silently contradicting the D-022 numbers already logged. Concrete,
+low-effort next step for whenever this recurs: check Windows Task
+Manager's Performance tab (CPU utilization, and specifically whether
+"Windows Defender Antivirus Service" or similar shows sustained activity)
+during a slow run, to actually gather evidence instead of guessing.
+**Files touched:** `docs/trd.md` §6 (latency section revised to state
+range + variance + open root-cause question, not a fixed baseline).
+**Not treated as blocking:** per the established pattern (D-022's
+explicit user choice to accept latency and proceed), this doesn't halt
+further work -- it's logged so the next time someone is confused by a
+wildly different timing number, the answer is "known, documented,
+unexplained variance," not a new mystery each time.
+
+### D-030 — Verbose mode simplified: same spinner UI, footer-only difference
+**Phase:** UX feature, follow-up refinement
+**Decision:** per direct user request, `--verbose` no longer prints a
+per-stage log or streams tokens live during processing — it now uses
+the exact same `Spinner`-based UI as default (quiet) mode. The only
+remaining difference: after the same clean answer + sources output,
+`--verbose` prints an extra diagnostic footer (flags, if any, and
+elapsed time).
+**Rationale beyond "user asked":** this also resolves a real technical
+tension I hadn't flagged before — the old verbose design combined a
+per-stage `print()` log with live token streaming to stdout, which
+would have visually conflicted with a threaded spinner writing `\r`-
+based updates to the same terminal if both were ever active together.
+Unifying on one UI removes that latent conflict, not just satisfies the
+request.
+**Files touched:** `src/main.py` (module docstring, `--verbose` help
+text, `main()` rewritten to a single shared code path with the footer
+gated behind `args.verbose`).
+**Verification:** 87/87 full regression sweep, zero regressions.
+Manually re-confirmed `--help` text is accurate and the model-missing
+error path is unaffected. NOT yet verified: an actual real-hardware run
+of `--verbose` under the new behavior — same pattern as everything else,
+needs real confirmation before treating this as done.
+
 ---
 **Return to `/context.md` for next steps.**

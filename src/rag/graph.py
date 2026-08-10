@@ -14,7 +14,7 @@ inside the graph itself, so both paths share one place that check runs).
 
 from __future__ import annotations
 
-import sys
+from typing import Callable
 
 import tools  # noqa: F401 -- registers built-in tools, see tools/__init__.py
 from langgraph.graph import END, StateGraph
@@ -28,27 +28,32 @@ from rag.retriever_hybrid import dedupe, retrieve
 from rag.sufficiency import should_retry, sufficiency_node
 from rag.synthesis import generate
 
+_NOOP_REPORT: Callable[[str], None] = lambda _msg: None
 
-def build_graph(model: FathomModel, top_k: int = 8):
+
+def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None] | None = None):
     """Returns a compiled LangGraph graph. `model` is closed over by the
     node functions below rather than threaded through ResearchState,
     since it's infrastructure (the loaded model), not query-specific
     data -- keeping it out of the TypedDict state matches how
     core/llm_backend.py's singleton is used everywhere else in the app.
+
+    `report`, if given, is called with a short stage-description string
+    at the start of each node -- main.py wires this to either verbose
+    stage-by-stage logging or a single-line spinner update (see
+    core/ui.py, decisions.md D-027). Defaults to a no-op so build_graph()
+    stays callable without a reporter (e.g. from tests).
     """
+    report = report or _NOOP_REPORT
 
     def planner_node(state: ResearchState) -> ResearchState:
-        print("  Planning sub-questions...", file=sys.stderr)
+        report("Planning sub-questions")
         return plan_node(state, model)
 
     def retrieval_node(state: ResearchState) -> ResearchState:
         sub_qs = state.get("sub_queries", [state["original_query"]])
-        print(
-            f"  Retrieving evidence (attempt {state.get('retry_count', 0) + 1}, "
-            f"{len(sub_qs)} sub-quer{'y' if len(sub_qs) == 1 else 'ies'}): "
-            f"{sub_qs}",
-            file=sys.stderr,
-        )
+        attempt = state.get("retry_count", 0) + 1
+        report(f"Retrieving evidence (attempt {attempt})")
         new_chunks = []
         for sub_query in sub_qs:
             new_chunks.extend(retrieve(sub_query))
@@ -77,7 +82,7 @@ def build_graph(model: FathomModel, top_k: int = 8):
         return state
 
     def sufficiency_check_node(state: ResearchState) -> ResearchState:
-        print("  Checking whether evidence is sufficient...", file=sys.stderr)
+        report("Checking whether evidence is sufficient")
         return sufficiency_node(state, model)
 
     def retry_increment_node(state: ResearchState) -> ResearchState:
@@ -88,13 +93,12 @@ def build_graph(model: FathomModel, top_k: int = 8):
         state["retry_count"] = state.get("retry_count", 0) + 1
 
         # THE ACTUAL "refine sub_queries using gap" step from
-        # code_logic.md §4 -- see decisions.md D-024/D-025. Uses
-        # `refined_search_query` (short, query-shaped, from
-        # rag/sufficiency.py's dedicated schema field), NOT
-        # `sufficiency_gap` (human-readable prose, meant for the
-        # user-facing caveat only). B-006: the first version of this fix
-        # appended the raw prose gap as a "query," which sent full
-        # sentences to search APIs and made retrieval worse, not better.
+        # code_logic.md §4 -- see decisions.md D-024/D-025/D-026. Uses
+        # `refined_search_query` (short, query-shaped, validated/derived
+        # in rag/sufficiency.py), NOT `sufficiency_gap` (human-readable
+        # prose, meant for the user-facing caveat only). B-006: the first
+        # version of this fix appended raw prose as a "query," which sent
+        # full sentences to search APIs and made retrieval worse.
         refined_query = state.get("refined_search_query")
         if refined_query:
             existing = state.get("sub_queries", [])
@@ -103,7 +107,7 @@ def build_graph(model: FathomModel, top_k: int = 8):
         return state
 
     def synthesis_node(state: ResearchState) -> ResearchState:
-        print("  Generating final answer...", file=sys.stderr)
+        report("Generating final answer")
         chunks = state.get("retrieved_chunks", [])
         answer, citations = generate(state["original_query"], chunks, model)
 
@@ -151,7 +155,12 @@ def build_graph(model: FathomModel, top_k: int = 8):
     return graph.compile()
 
 
-def run_agentic(query: str, model: FathomModel, top_k: int = 8) -> ResearchState:
+def run_agentic(
+    query: str,
+    model: FathomModel,
+    top_k: int = 8,
+    report: Callable[[str], None] | None = None,
+) -> ResearchState:
     """Entry point for main.py -- builds and runs the graph for one
     query. Building the graph per-call (not cached) is cheap; it's
     control-flow wiring, not the expensive part (the LLM calls inside
@@ -159,7 +168,7 @@ def run_agentic(query: str, model: FathomModel, top_k: int = 8) -> ResearchState
     """
     from core.state import new_state
 
-    compiled = build_graph(model, top_k=top_k)
+    compiled = build_graph(model, top_k=top_k, report=report)
     initial_state = new_state(query)
     initial_state["path"] = "agentic"
     final_state = compiled.invoke(initial_state)

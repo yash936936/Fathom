@@ -38,6 +38,40 @@ explicitly rather than guessing.
 
 _CITATION_TAG_PATTERN = re.compile(r"\[([a-zA-Z0-9_:.-]+)\]")
 
+# Matches a sentence-ending punctuation mark followed by whitespace --
+# used to find the last COMPLETE sentence boundary in a possibly-
+# truncated answer. Deliberately simple (no abbreviation handling like
+# "Dr." or "U.S." -- a real NLP sentence splitter is overkill here);
+# worst case it trims one sentence more than strictly necessary, which
+# is a much better failure mode than showing a dangling word fragment.
+_SENTENCE_END_PATTERN = re.compile(r"[.!?]\s")
+
+
+def _smooth_truncation(text: str) -> str:
+    """If `text` ends mid-sentence (a hard max_tokens cap cut it off
+    before a natural stopping point -- see decisions.md D-028, caught in
+    real quick-mode output ending in "The U"), trim back to the last
+    complete sentence instead of showing a dangling fragment. If there's
+    no complete sentence to trim back to at all, mark the cutoff
+    explicitly rather than silently presenting a fragment as complete.
+    """
+    stripped = text.rstrip()
+    if not stripped:
+        return stripped
+    if stripped[-1] in ".!?":
+        return stripped  # already ends cleanly, nothing to do
+
+    matches = list(_SENTENCE_END_PATTERN.finditer(stripped))
+    if matches:
+        trimmed = stripped[: matches[-1].end()].rstrip()
+        if trimmed:
+            return trimmed
+
+    # No complete sentence anywhere (e.g. max_tokens cut off during the
+    # very first sentence) -- don't silently show a fragment as if it
+    # were the whole answer.
+    return stripped + " [response cut short]"
+
 
 def _format_sources(chunks: list[RetrievedChunk]) -> str:
     lines = []
@@ -122,7 +156,8 @@ def generate(
         temperature=0.3,
         on_token=on_token,
     )
+    answer = _smooth_truncation(answer.strip())
 
     valid_ids = {c["source_id"] for c in chunks}
     citations = _extract_citations(answer, valid_ids)
-    return answer.strip(), citations
+    return answer, citations
