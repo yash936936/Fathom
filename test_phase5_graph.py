@@ -35,7 +35,7 @@ FAKE_CHUNK = RetrievedChunk(
 )
 
 
-def fake_retrieve(query, tool_names=None, max_results_per_tool=5):
+def fake_retrieve(query, tool_names=None, max_results_per_tool=5, debug_report=None):
     return [FAKE_CHUNK]
 
 
@@ -48,13 +48,14 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
             '{"sub_queries": ["fusion energy progress"], "requires_recency": true}',  # planner
             '{"sufficient": true, "gap": "", "search_query": ""}',  # sufficiency check -- passes immediately
             "Fusion energy has progressed significantly [web:0].",  # synthesis
+            '[{"index": 0, "supported": true}]',  # verification
         ]
     )
     final_state = run_agentic("What's the latest fusion energy progress?", model)
     check("graph completes with sufficient=True on first pass", final_state.get("sufficiency") is True)
     check("graph completes with retry_count still 0", final_state.get("retry_count", 0) == 0)
     check("graph produces a non-empty answer", bool(final_state.get("answer")))
-    check("all 3 scripted model calls were consumed (planner, sufficiency, synthesis)", len(model.call_log) == 3)
+    check("all 4 scripted model calls were consumed (planner, sufficiency, synthesis, verification)", len(model.call_log) == 4)
 
 # --- Test 2: insufficient once, then sufficient -- retry loop actually cycles ---
 with patch("rag.graph.retrieve", side_effect=fake_retrieve):
@@ -66,12 +67,13 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
             '{"sufficient": false, "gap": "need more specific recent data", "search_query": "fusion energy 2026 progress"}',  # 1st sufficiency check -- insufficient
             '{"sufficient": true, "gap": "", "search_query": ""}',  # 2nd sufficiency check (after retry) -- sufficient
             "Fusion energy has progressed [web:0].",  # synthesis
+            '[{"index": 0, "supported": true}]',  # verification
         ]
     )
     final_state2 = run_agentic_2("What's the latest fusion energy progress?", model2)
     check("retry loop incremented retry_count exactly once", final_state2.get("retry_count") == 1)
     check("graph eventually reaches sufficient=True after retry", final_state2.get("sufficiency") is True)
-    check("all 4 scripted model calls were consumed (retry loop actually ran)", len(model2.call_log) == 4)
+    check("all 5 scripted model calls were consumed (retry loop actually ran, plus verification)", len(model2.call_log) == 5)
 
 # --- Test 3: always insufficient -- retry cap is respected, doesn't loop forever ---
 with patch("rag.graph.retrieve", side_effect=fake_retrieve):
@@ -83,6 +85,7 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
         ['{"sub_queries": ["q"], "requires_recency": false}']
         + always_insufficient
         + ["Best-effort answer given incomplete evidence [web:0]."]
+        + ['[{"index": 0, "supported": true}]']  # verification
     )
     final_state3 = run_agentic_3("some query", model3)
     check(f"retry cap respected -- retry_count == MAX_RETRIES ({MAX_RETRIES})", final_state3.get("retry_count") == MAX_RETRIES)
@@ -95,7 +98,7 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
 call_count = {"n": 0}
 
 
-def incrementing_retrieve(query, tool_names=None, max_results_per_tool=5):
+def incrementing_retrieve(query, tool_names=None, max_results_per_tool=5, debug_report=None):
     call_count["n"] += 1
     return [
         RetrievedChunk(
@@ -118,6 +121,7 @@ with patch("rag.graph.retrieve", side_effect=incrementing_retrieve):
             '{"sufficient": false, "gap": "missing fission reactor data", "search_query": "small modular reactor 2026"}',
             '{"sufficient": true, "gap": "", "search_query": ""}',
             "Final answer [web:1][web:2].",
+            '[{"index": 0, "supported": true}, {"index": 1, "supported": true}]',  # verification
         ]
     )
     final_state4 = run_agentic_4("compare X and Y", model4)

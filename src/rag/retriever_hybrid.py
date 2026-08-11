@@ -12,6 +12,8 @@ applies conceptually to how scores are combined across sources; it's the
 
 from __future__ import annotations
 
+from typing import Callable
+
 import tools  # noqa: F401 -- must import before dispatch() calls below; see tools/__init__.py
 from core.state import RetrievedChunk
 from tools.registry import dispatch
@@ -21,27 +23,54 @@ def retrieve(
     query: str,
     tool_names: list[str] | None = None,
     max_results_per_tool: int = 5,
+    debug_report: Callable[[str], None] | None = None,
 ) -> list[RetrievedChunk]:
     """Fan out `query` across the given tools (default: all registered
-    web/news/arxiv/curated tools), then fuse + dedupe.
+    web/news/arxiv/curated/github/reddit tools), then fuse + dedupe.
 
     tool_names defaults to a fixed list rather than tools.registry.list_tools()
     so a badly-behaved or slow tool added later doesn't silently get
     included in every retrieval call -- retrieval sources are opt-in.
+
+    `debug_report`, if given, is called once per tool with a
+    success/failure summary -- see decisions.md D-033. Without it, a
+    failing tool (rate limit, malformed query, network error) was
+    previously indistinguishable from "legitimately zero results,"
+    since the bare except below intentionally doesn't fail the whole
+    retrieval. That's still the right behavior for correctness; this
+    just makes the silence optional rather than absolute.
     """
     if tool_names is None:
-        tool_names = ["web_search", "news_search", "arxiv_search", "curated_search"]
+        # Per decisions.md D-031: github_search/reddit_search added to
+        # the default set on explicit user request. This is a
+        # deliberate opt-IN edit to the default list, not automatic --
+        # see D-024's original note that a badly-behaved new tool
+        # shouldn't silently join every retrieval call.
+        tool_names = [
+            "web_search",
+            "news_search",
+            "arxiv_search",
+            "curated_search",
+            "github_search",
+            "reddit_search",
+        ]
 
     all_chunks: list[RetrievedChunk] = []
     for name in tool_names:
         try:
             chunks = dispatch(name, query=query, max_results=max_results_per_tool)
             all_chunks.extend(chunks)
-        except Exception:
+            if debug_report:
+                debug_report(f"{name}: {len(chunks)} chunks")
+        except Exception as exc:
             # A single tool failing (network error, parse error, etc.)
             # should not fail the whole retrieval -- other sources may
             # still have useful results. Sufficiency check (Phase 5)
-            # handles the case where too many sources failed.
+            # handles the case where too many sources failed. The
+            # exception itself is only surfaced via debug_report, never
+            # raised or silently logged by default.
+            if debug_report:
+                debug_report(f"{name}: FAILED -- {type(exc).__name__}: {exc}")
             continue
 
     return dedupe(all_chunks)

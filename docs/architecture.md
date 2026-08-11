@@ -60,6 +60,8 @@ fathom/
 │   │   ├── web_search.py
 │   │   ├── news_feed.py
 │   │   ├── arxiv_feed.py
+│   │   ├── github_search.py       # D-031 -- GitHub REST search, no API key
+│   │   ├── reddit_search.py       # D-031 -- Reddit public .json search, no API key (fragile, unofficial)
 │   │   └── vector_store.py        # curated local source DB (hybrid search backend)
 │   │
 │   ├── memory/

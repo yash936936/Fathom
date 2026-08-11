@@ -87,6 +87,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="Max retrieved chunks to keep after reranking (default: 8).",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print raw diagnostic detail (sub_queries per retrieval "
+        "attempt, tool success/failure, citation verification counts) "
+        "as plain lines to stderr, independent of --verbose's footer. "
+        "For developers diagnosing retrieval/verification behavior.",
+    )
     return parser
 
 
@@ -99,6 +107,7 @@ def run_query(
     top_k: int,
     report: Callable[[str], None],
     stream_tokens: bool,
+    debug_report: Callable[[str], None] | None = None,
 ) -> tuple[str, str, list[str], bool]:
     """Returns (answer_text, sources_block, flags, already_streamed).
 
@@ -108,7 +117,11 @@ def run_query(
 
     `report` is called with a short stage description at each step --
     the caller decides whether that becomes a spinner update or a
-    printed line (see core/ui.py).
+    printed line (see core/ui.py). `debug_report`, if given, surfaces
+    raw diagnostic detail (sub_queries, tool success/failure, citation
+    verification counts) independent of the spinner UI -- see
+    decisions.md D-033, added after D-030's simplified --verbose
+    accidentally removed visibility needed to diagnose B-007.
     """
     state = new_state(query)
 
@@ -150,12 +163,12 @@ def run_query(
         report("Planning multi-step research")
         from rag.graph import run_agentic
 
-        final_state = run_agentic(query, model, top_k=top_k, report=report)
+        final_state = run_agentic(query, model, top_k=top_k, report=report, debug_report=debug_report)
         answer = final_state.get("answer", "")
         chunks = final_state.get("retrieved_chunks", [])
     else:
         report("Searching sources")
-        retrieved = retrieve(query)
+        retrieved = retrieve(query, debug_report=debug_report)
         chunks = rerank(retrieved, top_k=top_k, requires_recency=state.get("requires_recency", False))
 
         report(f"Generating answer from {len(chunks)} sources")
@@ -220,8 +233,17 @@ def main(argv: list[str] | None = None) -> int:
     # with the spinner writing to the same terminal anyway). The ONLY
     # difference --verbose makes now is an extra diagnostic footer
     # (flags + elapsed time) after the clean answer, nothing during.
-    with Spinner() as spinner:
-        report = make_stage_reporter(verbose=False, spinner=spinner)
+    if args.debug:
+        # --debug bypasses the spinner entirely -- plain diagnostic
+        # lines and a threaded \r-repainting spinner would visually
+        # collide on the same terminal (same conflict category D-030
+        # already fixed for streaming vs spinner). See decisions.md
+        # D-033.
+        report = make_stage_reporter(verbose=True, spinner=None)
+
+        def debug_report(msg: str) -> None:
+            print(f"[debug] {msg}", file=sys.stderr)
+
         answer, sources_block, flags, _already_streamed = run_query(
             args.query,
             model,
@@ -230,9 +252,23 @@ def main(argv: list[str] | None = None) -> int:
             top_k=args.top_k,
             report=report,
             stream_tokens=False,
+            debug_report=debug_report,
         )
-    # Spinner's __exit__ has already cleared the line by this point.
-    print(answer)
+        print(answer)
+    else:
+        with Spinner() as spinner:
+            report = make_stage_reporter(verbose=False, spinner=spinner)
+            answer, sources_block, flags, _already_streamed = run_query(
+                args.query,
+                model,
+                mode=args.mode,
+                max_tokens=max_tokens,
+                top_k=args.top_k,
+                report=report,
+                stream_tokens=False,
+            )
+        # Spinner's __exit__ has already cleared the line by this point.
+        print(answer)
     if sources_block:
         print(sources_block)
 

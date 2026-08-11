@@ -794,5 +794,126 @@ error path is unaffected. NOT yet verified: an actual real-hardware run
 of `--verbose` under the new behavior — same pattern as everything else,
 needs real confirmation before treating this as done.
 
+### D-031 — New sources: GitHub and Reddit added; X explicitly declined
+**Phase:** tools extension (Phase 3 scope, not Phase 6)
+**Decision:** added `tools/github_search.py` (GitHub REST search API,
+unauthenticated, mandatory User-Agent) and `tools/reddit_search.py`
+(Reddit's public `.json` search endpoint, unauthenticated, mandatory
+User-Agent). Both added to `retriever_hybrid.py`'s default tool list —
+an explicit, logged edit to the default set (per D-024's original note
+that new tools shouldn't silently join by default).
+**X/Twitter explicitly declined, not silently omitted:** X's API has
+required a paid tier for search access since 2023 — directly conflicts
+with `trd.md`'s "no API key required for core operation" constraint.
+Scraping X is both fragile and against its ToS. Not built.
+**Honesty note on Reddit specifically:** unlike GitHub's and arXiv's
+official, documented public APIs, Reddit's `.json` endpoint is an
+unofficial surface that happens to work without OAuth — flagged in the
+module docstring as more fragile than the other three no-key sources,
+not presented as equally durable.
+**Files touched:** `src/tools/github_search.py` (new),
+`src/tools/reddit_search.py` (new), `src/tools/__init__.py` (registers
+both), `src/rag/retriever_hybrid.py` (default tool list).
+**Verification:** parser logic tested against realistic fixture
+payloads (not live endpoints, same sandbox limitation as every other
+network tool) — 10/10 in `test_phase6_sources.py`, including edge cases
+(null description, empty results) that wouldn't crash the parser.
+Registration confirmed: all 6 tools now show up via `list_tools()`.
+Live network calls NOT verified in this sandbox — same "needs a real
+machine" pattern as `web_search`/`arxiv_feed`/`news_feed` originally.
+
+### D-032 — Phase 6 started: citation_verifier, batched not per-claim
+**Phase:** 6
+**Decision:** built `verification/citation_verifier.py` — the per-claim
+entailment check documented in `code_logic.md` §5 back when the graph
+was first designed, but never actually implemented until now. Wired in
+as a new `verification` node in `rag/graph.py`, after `synthesis`,
+agentic path only — per the already-logged D-006 principle (heavy
+verification spends budget only where multi-hop risk is highest, never
+the fast path).
+**The one implementation choice worth naming:** ALL claims from one
+answer are batched into a SINGLE LLM call, not one call per claim. Given
+this project's measured per-call cost (D-022's ~375s baseline, D-029's
+much wider real variance), a per-claim verification loop would multiply
+an already-expensive synthesis call by however many citations the
+answer has — a fundamentally different, much worse cost profile than
+one additional call. Verified directly: `test_phase6_manual.py`
+confirms exactly one `model.chat()` call verifies two separate claims
+together, not two calls.
+**Fails open, consistent with every other classifier in this project:**
+if the verifier's output can't be parsed, citations are returned
+UNCHANGED (still `verified=None`), never guessed true or silently
+marked passing. An already-known-bad citation (unresolved source_id,
+set by `rag/synthesis.py` at parse time) is left alone rather than
+re-checked — no reason to spend a call re-confirming something already
+structurally known to be wrong.
+**User-facing behavior:** if any citation fails entailment, the
+agentic-path answer gets an appended caveat naming the count of
+unverified citations — same pattern as the existing sufficiency-gap
+caveat (D-024), not a silent pass/fail.
+**Phase 6 scope note, stated honestly:** this implements ONE of Phase
+6's three planned modules (`citation_verifier.py`). `answerability.py`
+(pre-retrieval false-premise check) and `self_consistency.py`
+(multi-sample variance check) from `phases.md`/`code_logic.md` are NOT
+built yet — deliberately prioritized citation_verifier first as the
+highest-value piece for a tool whose entire premise is grounded,
+verifiable answers. Phase 6 is not being marked complete.
+**Files touched:** `src/verification/citation_verifier.py` (new),
+`src/rag/graph.py` (new `verification` node + import + edges),
+`test_phase6_manual.py` (new), `test_phase5_graph.py` (updated stub
+fixtures — every scripted synthesis reply now needs a matching
+verification-stage reply, since the graph makes one more call per run).
+**Verification:** 8/8 in `test_phase6_manual.py` covering mixed
+verdicts, skip-already-known-bad, fail-open on unparseable output, and
+the zero-citations no-op case. Full regression sweep across the entire
+project: 105/105, zero regressions from wiring the new node into the
+graph. NOT yet verified: an actual real-hardware agentic run exercising
+the new verification node — same pattern as every feature in this
+project, real confirmation still needed.
+
+### D-033 — Real-hardware runs surfaced two real gaps: a D-030 side effect, and silent tool failures
+**Phase:** 6 verification, Phase 5 (B-007) re-verification
+**Finding 1, GitHub/Reddit query:** ran a real query expected to surface
+GitHub/Reddit results. Neither appeared anywhere in the Sources list —
+only web/news/arxiv results showed up. Root cause not yet determined
+(could be legitimately zero relevant results, could be a silent
+failure) BECAUSE `retriever_hybrid.retrieve()`'s bare
+`except Exception: continue` gives zero visibility into which outcome
+occurred — a real gap, not new behavior, just newly consequential now
+that two more tools exist to fail silently.
+**Finding 2, fusion-vs-fission query (B-007 re-test):** still couldn't
+find fission-reactor sources, retrieved near-random arXiv results again
+(LLM eval paper, graph-denoising paper) — the same symptom category as
+B-006. Could NOT be diagnosed further because D-030 (simplifying
+--verbose to match quiet mode) had an unintended side effect: it also
+removed the sub_queries-list printing that let B-005/B-006/B-007 get
+diagnosed in the first place. This was a real, unflagged regression in
+debuggability, caught here rather than earlier.
+**Decision:** added `--debug`, a new flag separate from `--verbose`,
+restoring raw diagnostic visibility (sub_queries per retrieval attempt,
+per-tool success/failure with exception detail, citation verification
+counts) without reverting D-030's clean default UX. `--debug` disables
+the spinner entirely rather than trying to interleave plain diagnostic
+lines with a threaded `\r`-repainting spinner -- same visual-conflict
+category D-030 already had to solve once for streaming vs. spinner, not
+a new problem, just the same one recurring in a new spot. `--verbose`'s
+footer still applies independently if both flags are given together.
+Also threaded a `debug_report` callback into
+`retriever_hybrid.retrieve()` itself, so a failing tool's exception
+type and message are surfaced on request rather than only "0 chunks vs
+some chunks" being distinguishable.
+**Not yet resolved:** WHY the fusion-vs-fission query still fails, and
+WHETHER GitHub/Reddit are actually broken -- both need a fresh run with
+`--debug` to actually see the evidence, not another guess.
+**Files touched:** `src/rag/retriever_hybrid.py` (`debug_report` param
++ exception surfacing), `src/rag/graph.py` (`debug_report` threaded
+through `build_graph`/`run_agentic`, added to retrieval/sufficiency/
+verification nodes), `src/main.py` (new `--debug` flag, spinner-bypass
+branch), `test_phase5_graph.py` (stub `retrieve()` fixtures updated for
+the new `debug_report` kwarg).
+**Verification:** full regression sweep, 105/105, zero regressions.
+NOT yet verified: an actual `--debug` run on real hardware — this whole
+feature exists specifically because we don't yet have that evidence.
+
 ---
 **Return to `/context.md` for next steps.**

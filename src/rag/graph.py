@@ -27,11 +27,17 @@ from rag.reranker import rerank
 from rag.retriever_hybrid import dedupe, retrieve
 from rag.sufficiency import should_retry, sufficiency_node
 from rag.synthesis import generate
+from verification import citation_verifier
 
 _NOOP_REPORT: Callable[[str], None] = lambda _msg: None
 
 
-def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None] | None = None):
+def build_graph(
+    model: FathomModel,
+    top_k: int = 8,
+    report: Callable[[str], None] | None = None,
+    debug_report: Callable[[str], None] | None = None,
+):
     """Returns a compiled LangGraph graph. `model` is closed over by the
     node functions below rather than threaded through ResearchState,
     since it's infrastructure (the loaded model), not query-specific
@@ -54,9 +60,11 @@ def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None
         sub_qs = state.get("sub_queries", [state["original_query"]])
         attempt = state.get("retry_count", 0) + 1
         report(f"Retrieving evidence (attempt {attempt})")
+        if debug_report:
+            debug_report(f"attempt {attempt} sub_queries: {sub_qs}")
         new_chunks = []
         for sub_query in sub_qs:
-            new_chunks.extend(retrieve(sub_query))
+            new_chunks.extend(retrieve(sub_query, debug_report=debug_report))
         # Accumulate across retries rather than overwrite -- a retry that
         # discards prior evidence and starts from scratch wastes the
         # previous attempt's (expensive) retrieval entirely. dedupe()
@@ -83,7 +91,14 @@ def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None
 
     def sufficiency_check_node(state: ResearchState) -> ResearchState:
         report("Checking whether evidence is sufficient")
-        return sufficiency_node(state, model)
+        result = sufficiency_node(state, model)
+        if debug_report:
+            debug_report(
+                f"sufficient={result.get('sufficiency')} "
+                f"gap={result.get('sufficiency_gap')!r} "
+                f"refined_search_query={result.get('refined_search_query')!r}"
+            )
+        return result
 
     def retry_increment_node(state: ResearchState) -> ResearchState:
         # Separate tiny node (rather than folding into sufficiency_check)
@@ -127,6 +142,27 @@ def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None
         state["citations"] = citations
         return state
 
+    def verification_node(state: ResearchState) -> ResearchState:
+        # Per decisions.md D-006/D-032: heavy per-claim entailment check,
+        # agentic path only, one batched call for the whole answer, not
+        # per-claim. Phase 6 (this node).
+        report("Verifying citations")
+        chunks = state.get("retrieved_chunks", [])
+        citations = citation_verifier.verify_citations(state.get("citations", []), chunks, model)
+        state["citations"] = citations
+
+        _verified, unverified, unchecked = citation_verifier.summarize(citations)
+        if debug_report:
+            debug_report(f"citations: {_verified} verified, {unverified} unverified, {unchecked} unchecked")
+        if unverified:
+            state.setdefault("guardrail_flags", []).append(f"citations_unverified:{unverified}")
+            state["answer"] += (
+                f"\n\n[Note: {unverified} citation(s) in this answer could "
+                f"not be confirmed against their source text on review -- "
+                f"treat those specific claims with extra caution.]"
+            )
+        return state
+
     def route_after_sufficiency(state: ResearchState) -> str:
         return "retry" if should_retry(state) else "synthesize"
 
@@ -138,6 +174,7 @@ def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None
     graph.add_node("sufficiency_check", sufficiency_check_node)
     graph.add_node("retry_increment", retry_increment_node)
     graph.add_node("synthesis", synthesis_node)
+    graph.add_node("verification", verification_node)
 
     graph.set_entry_point("planner")
     graph.add_edge("planner", "retrieval")
@@ -150,7 +187,8 @@ def build_graph(model: FathomModel, top_k: int = 8, report: Callable[[str], None
         {"retry": "retry_increment", "synthesize": "synthesis"},
     )
     graph.add_edge("retry_increment", "retrieval")
-    graph.add_edge("synthesis", END)
+    graph.add_edge("synthesis", "verification")
+    graph.add_edge("verification", END)
 
     return graph.compile()
 
@@ -160,6 +198,7 @@ def run_agentic(
     model: FathomModel,
     top_k: int = 8,
     report: Callable[[str], None] | None = None,
+    debug_report: Callable[[str], None] | None = None,
 ) -> ResearchState:
     """Entry point for main.py -- builds and runs the graph for one
     query. Building the graph per-call (not cached) is cheap; it's
@@ -168,7 +207,7 @@ def run_agentic(
     """
     from core.state import new_state
 
-    compiled = build_graph(model, top_k=top_k, report=report)
+    compiled = build_graph(model, top_k=top_k, report=report, debug_report=debug_report)
     initial_state = new_state(query)
     initial_state["path"] = "agentic"
     final_state = compiled.invoke(initial_state)

@@ -7,32 +7,36 @@
 ---
 
 ## Current state
-- **Active phase:** UX feature (quick/deep modes + spinner) — B-008
-  closed for real; a bigger open question surfaced (latency variance)
-- **Feature status:** All three modes confirmed working on real
-  hardware across multiple runs. B-008 (truncation) CLOSED — re-tested
-  twice more, both answers ended cleanly, no truncation. Full
-  regression: 87/87.
-- **Open, more important than B-008 was:** D-029 — the same simple
-  query, same mode, same machine, back-to-back runs measured 139.0s,
-  141.4s, and then 3277.0s (54.6 min) with nothing externally different
-  (confirmed directly with the user: no sleep, no other heavy programs,
-  nothing noticed). All prior latency figures (D-022's 375.7s baseline,
-  D-024-026's ~250-450s range) should now be read as samples from a
-  wide, poorly-understood distribution, not stable numbers. `trd.md` §6
-  updated to state this honestly. Root cause NOT identified — leading
-  unconfirmed candidate is intermittent Defender/antivirus interference
-  (raised as a hypothesis back in D-016, never actually tested).
-- **Still outstanding, unrelated:** B-007's Phase 5 retry-refinement fix
-  (fusion-vs-fission comparison query) still needs its own real-hardware
-  confirmation — untouched since the UX feature work started.
-- **Latency:** no longer treated as a stable ~375s baseline — see D-029.
-  Quick mode's actual speed also still unmeasured precisely (didn't
-  time it in the two confirmation runs), though it completed without
-  the earlier truncation issue.
-- **Next phase:** Phase 6 — Hallucination/verification layer, OR
-  finishing Phase 5's real-hardware confirmation first. Should not
-  start until BOTH the Phase 5 fix chain AND this UX feature are
+- **Active phase:** Phase 6 — Hallucination/verification layer (started,
+  not complete) + new source tools (GitHub, Reddit)
+- **Phase 5 status, stated precisely:** the retry-refinement bug chain
+  (B-005→B-006→B-007) is fixed and unit-tested but STILL has not had a
+  real-hardware confirmation run since B-007 landed — this was asked
+  about directly and confirmed still outstanding, not silently marked
+  done. Do not treat Phase 5 as fully confirmed.
+- **UX feature (modes/spinner):** confirmed working on real hardware
+  (Entry 013-015). B-008 (truncation) closed. D-030 (verbose simplified
+  to match quiet mode + footer) confirmed via a real clean run.
+- **New this session:** (1) D-031 — added `github_search`/
+  `reddit_search` tools (both no-API-key), declined X/Twitter with
+  reasoning (paid API required). (2) D-032 — started Phase 6:
+  `verification/citation_verifier.py` built and wired into the agentic
+  path as a new graph node, batched single-call design (not per-claim),
+  fails open on parse failure. Phase 6 explicitly NOT complete —
+  `answerability.py` and `self_consistency.py` from the original plan
+  are still unbuilt, prioritized citation_verifier first as the
+  highest-value piece.
+- **Regression status:** 105/105 across the entire test suite
+  (8 files), zero regressions from this session's changes.
+- **NOT yet verified on real hardware (growing list, stated honestly):**
+  B-007's Phase 5 fix, the new citation_verifier node in a real agentic
+  run, and the new GitHub/Reddit tools against live endpoints. None of
+  the sandbox-based verification substitutes for these.
+- **Latency:** still an open, unresolved-cause variance question — see
+  D-029. Not re-investigated this session.
+- **Next phase:** finish Phase 6 (`answerability.py`,
+  `self_consistency.py`) OR close the outstanding real-hardware
+  confirmations first. Should not
   confirmed on real hardware — the
   prior confirmation was of buggy behavior that happened to produce a
   correct-looking result.
@@ -43,6 +47,59 @@
 ---
 
 ## Log (newest first)
+
+### Entry 017
+**Phase:** debuggability fix, blocking on real evidence
+**Action taken:** ran the two requested real-hardware confirmations.
+GitHub/Reddit didn't appear in a query expected to surface them; the
+fusion-vs-fission query still failed to find fission sources (same
+symptom as B-006). Investigated why I couldn't diagnose either
+properly: found D-030 had an unflagged side effect — simplifying
+`--verbose` also removed the sub_queries-list printing that made
+B-005/B-006/B-007 diagnosable in the first place. Added `--debug`
+(separate from `--verbose`) to restore that visibility plus per-tool
+failure detail in `retriever_hybrid.retrieve()`, without reverting
+D-030's clean default UX.
+**Decisions logged this run:** D-033 — both findings, the D-030 side
+effect, and the `--debug` design (spinner-bypass, same visual-conflict
+reasoning as D-030).
+**Debug entries logged this run:** none yet — the actual root causes of
+the two real-run failures are still unknown, not yet debug-log-worthy
+until `--debug` gives us evidence.
+**Regression status:** 105/105, zero regressions.
+**Next action for next session:** re-run BOTH queries with `--debug`
+and report the full output. This is the actual next step for B-007 and
+the GitHub/Reddit question — not a new item, the same two open items
+from Entry 016, now with the tool needed to actually see what's
+happening.
+
+### Entry 016
+**Phase:** New tools (GitHub, Reddit) + Phase 6 start
+**Action taken:** in response to a combined request (confirm status +
+start Phase 6 + add sources), gave an honest status check first rather
+than a blanket "confirmed" — pointed out Phase 5's B-007 fix still lacks
+real-hardware confirmation, and that "Phase 6" and "new sources" are
+different scopes per our own docs. Then did both: added
+`github_search`/`reddit_search` tools (no API key), explicitly declined
+X/Twitter with reasoning (paid API requirement conflicts with `trd.md`).
+Started Phase 6 with `verification/citation_verifier.py` — batched
+per-answer entailment checking, wired into the agentic path only (per
+already-logged D-006), fails open on parse failure.
+**Decisions logged this run:** D-031 (new sources), D-032 (Phase 6
+start, batched-not-per-claim design, explicit scope note that Phase 6
+isn't complete).
+**Debug entries logged this run:** none — clean implementation, all
+failures caught were stale test fixtures (needed one more scripted
+reply per test for the new verification call), not real bugs.
+**Phase 6 exit criteria met?** No — explicitly not. One of three planned
+modules built (`citation_verifier.py`). `answerability.py` and
+`self_consistency.py` remain unbuilt.
+**Regression status:** 105/105 across all 8 test files.
+**Next action for next session:** real-hardware confirmation is now
+owed on THREE fronts: (1) B-007's Phase 5 fix (oldest outstanding item),
+(2) the new citation_verifier node in an actual agentic run, (3) the
+new GitHub/Reddit tools against live endpoints. Recommend picking one
+deliberately rather than letting the list keep growing unconfirmed.
 
 ### Entry 015
 **Phase:** UX feature, refinement
