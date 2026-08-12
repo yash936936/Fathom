@@ -308,5 +308,38 @@ rate-limiting behavior can only be confirmed on a real run with real
 network access to arXiv — flagged as still needing that confirmation,
 not claimed as fixed from sandbox testing alone.
 
+**Closure update:** confirmed on real hardware — zero `FAILED` entries
+across an entire run that previously had multiple 429s/timeouts. B-012
+is closed.
+
+### B-013 — arXiv results irrelevant despite successful calls (same root cause as B-010)
+**Phase:** 5/6, real-hardware run
+**Symptom:** with B-011/B-012 both confirmed fixed, `arxiv_search`
+calls succeeded (5 chunks each) but returned clearly unrelated papers
+(video forensics, heavy-ion collisions, group recommendation) instead
+of fusion/fission content.
+**Root cause:** `arxiv_feed.py` sent full natural-language sentence
+queries directly into arXiv's `all:` search — identical root cause to
+B-010 (GitHub), just never applied to this tool.
+**Fix:** applied `core/text_utils.py`'s `simplify_to_keywords()` before
+the arXiv query, same as `github_search.py`.
+**Files touched:** `src/tools/arxiv_feed.py`, `test_phase6_sources.py`.
+**Verification:** simplification tested directly against the real
+sub-query text from the live run that exposed this. Live
+re-confirmation of actual result relevance still needed.
+
+### Noted, not fixed — citation regex misses comma-separated multi-ID brackets
+**Phase:** 6, observed during B-013's investigation
+**Symptom:** model wrote `[arxiv:2, arxiv:3]` as one bracket with two
+IDs; `_CITATION_TAG_PATTERN` in `rag/synthesis.py` only matches a
+single clean ID per bracket, so both citations were silently missed
+(0 extracted from a sentence that referenced 2 real sources).
+**Impact:** citation *undercounting*, not false grounding — nothing
+unsupported got marked as verified. Lower severity than B-005/B-006/
+B-011's category of bug.
+**Status:** deliberately not fixed this turn — flagged rather than
+silently expanding scope. Worth a small regex/parsing fix in a future
+pass if this format recurs often enough to matter.
+
 ---
 **Return to `/context.md` for next steps.**

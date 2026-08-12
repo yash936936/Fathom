@@ -82,6 +82,14 @@ check(
 check("simplify_to_keywords respects max_words cap", len(simplify_to_keywords("one two three four five six seven eight nine ten", max_words=4).split()) == 4)
 check("simplify_to_keywords handles all-stopword input without crashing", simplify_to_keywords("what is the") == "")
 
+# --- D-036: arxiv_feed.py now also simplifies queries, same fix as github_search.py ---
+q1 = "What are the latest developments in fusion energy research and recent milestones in experimental reactors like ITER, SPARC, or private fusion startups?"
+simplified_q1 = simplify_to_keywords(q1, max_words=8)
+check(
+    "arxiv-style query simplification produces a real keyword query from the exact real failing sub_query",
+    simplified_q1 == "fusion energy research milestones experimental reactors iter sparc",
+)
+
 # --- D-034: reddit_search removed from retriever_hybrid's default list ---
 import inspect
 from rag.retriever_hybrid import retrieve as retrieve_fn

@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ET
 import requests
 
 from core.state import RetrievedChunk
+from core.text_utils import simplify_to_keywords
 from tools.registry import register_tool
 
 _ARXIV_API_URL = "http://export.arxiv.org/api/query"
@@ -71,8 +72,14 @@ def _parse_atom(xml_text: str) -> list[dict[str, str]]:
 
 def search(query: str, max_results: int = 5, timeout: float = 20.0) -> list[RetrievedChunk]:
     _throttle()
+    # Per decisions.md D-036: real evidence showed raw natural-language
+    # sentence queries against arXiv's `all:` search return loosely
+    # term-matched, often irrelevant papers -- same root cause as
+    # B-010's GitHub problem, unapplied to this tool until now. Simplify
+    # to keywords first, same as github_search.py.
+    simplified = simplify_to_keywords(query, max_words=8) or query
     params = {
-        "search_query": f"all:{query}",
+        "search_query": f"all:{simplified}",
         "start": 0,
         "max_results": max_results,
         "sortBy": "submittedDate",

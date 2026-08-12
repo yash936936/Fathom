@@ -1018,5 +1018,38 @@ which `list()` silently iterated character-by-character).
 B-011's fix verified directly against the real gap and rejected
 search_query text from this exact live run, not synthetic data.
 
+### D-036 — B-011/B-012 fully confirmed; arXiv needed the same query-simplification fix as GitHub
+**Phase:** 5/6, fourth real verification round
+**B-011 confirmed:** the SECOND sufficiency check (previously always
+`None`) now produced a real refined query
+(`'progress fusion energy next-generation fission reactor designs'`),
+correctly appended to `sub_queries`. This was exactly the broken case.
+**B-012 confirmed:** every single `arxiv_search` call across both real
+queries succeeded — zero `FAILED` entries anywhere in the run, versus
+multiple 429s/timeouts before the throttle fix.
+**New finding, same root cause as B-010, unapplied to a second tool:**
+despite real, well-formed sub-queries and successful arXiv calls, the
+returned papers were still irrelevant (video forensics, heavy-ion
+collision physics, group recommendation) — `arxiv_feed.py` never got
+the keyword-simplification treatment `github_search.py` did (B-010). It
+was still sending full natural-language sentences into arXiv's `all:`
+search, which does loose term-matching. Fixed identically to B-010:
+`simplify_to_keywords()` applied before the query is sent. Verified
+directly against the exact real sub-query text from this run.
+**Separately noted, NOT fixed this turn:** the model wrote
+`[arxiv:2, arxiv:3]` as one bracket with two comma-separated IDs — our
+citation regex only matches single clean IDs per bracket, so it
+extracted zero citations from a sentence that referenced two real
+sources. Does not compromise safety (nothing false was marked grounded,
+it just under-counted), but it's a real parsing gap. Deliberately
+deferred rather than silently expanded scope — flagged here so it isn't
+lost, not treated as urgent since it doesn't cause incorrect grounding.
+**Files touched:** `src/tools/arxiv_feed.py`, `test_phase6_sources.py`.
+**Verification:** 113/113 full regression sweep. Simplification tested
+directly against the real sub-query text from this exact live run.
+Live network re-confirmation of the actual result relevance still
+needed — sandbox can verify the query transformation, not whether
+arXiv's results genuinely improve.
+
 ---
 **Return to `/context.md` for next steps.**

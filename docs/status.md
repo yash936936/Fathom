@@ -9,31 +9,22 @@
 ## Current state
 - **Active phase:** Phase 6 — Hallucination/verification layer (started,
   not complete) + new source tools (GitHub, Reddit)
-- **Stale-file theory CONFIRMED correct** — clean re-extraction fixed
-  it, `grep` showed the fallback code present, and a fresh real run
-  proved it out (D-035).
-- **Real, confirmed-on-hardware successes:**
-  1. **GitHub search (B-010): CLOSED.** 5 real relevant chunks returned.
-  2. **`citation_verifier` (Phase 6, D-032): first real confirmation.**
-     Ran on a live agentic query, correctly reported 2/0/0
-     verified/unverified/unchecked.
-  3. **B-007's primary fix path: confirmed genuinely working.** A real
-     run produced a real, well-formed `refined_search_query` directly
-     from the model and correctly used it on the next retry attempt.
-- **Two new real bugs found by this same run, both fixed:**
-  - **B-011:** the gap-derived fallback never ran when the model's
-    search_query was PRESENT but rejected (too long) — only the fully-
-    empty case reached it. Fixed: restructured to a single
-    `usable_query` variable, fallback now runs whenever the primary
-    path didn't produce something usable, for any reason.
-  - **B-012:** arXiv calls under the agentic path's retry loop hit real
-    rate limits (429s) and timeouts — no throttling existed. Fixed:
-    self-throttle to ~1 req/3s (arXiv's own guidance) + raised timeout
-    10s→20s. NOT yet re-confirmed on real hardware.
-- **Reddit (B-009): confirmed removed from defaults, working as
-  intended** (no wasted calls to a permanently-blocking endpoint).
-- **Regression status:** 108/108 across the entire test suite (8
-  files), zero regressions from any of this session's fixes.
+- **B-011 and B-012 BOTH fully confirmed on real hardware** — the exact
+  broken case (second sufficiency check returning None) now produces a
+  real refined query; every arxiv_search call succeeded, zero
+  429s/timeouts across an entire run. Both closed.
+- **B-013 found and fixed in the same run:** arXiv results were still
+  irrelevant despite successful calls — same root cause as B-010
+  (natural-language sentences sent raw to a keyword-oriented search),
+  just never applied to arxiv_feed.py until now. Fixed identically.
+- **Noted, deliberately not fixed:** citation regex misses comma-
+  separated multi-ID brackets (`[arxiv:2, arxiv:3]`) — undercounts
+  citations, doesn't cause false grounding. Logged, not urgent.
+- **Prior real, confirmed-on-hardware successes (still standing):**
+  GitHub search (B-010, closed), `citation_verifier` (Phase 6, first
+  real confirmation), B-007's primary fix path, Reddit removal (B-009).
+- **Regression status:** 113/113 across the entire test suite (8
+  files), zero regressions from any fix in this whole thread.
 - **Latency:** still an open, unresolved-cause variance question — see
   D-029. Not re-investigated this session.
 - **Next phase:** finish Phase 6 (`answerability.py`,
@@ -49,6 +40,26 @@
 ---
 
 ## Log (newest first)
+
+### Entry 020
+**Phase:** B-011/B-012 confirmed; B-013 found and fixed
+**Action taken:** re-ran the fusion-vs-fission query. B-011 and B-012
+both fully confirmed working on real hardware (exact previously-broken
+case now works; zero arxiv failures across the whole run). Found B-013
+in the same run — arXiv results still irrelevant despite successful
+calls, same root cause as B-010 unapplied to a second tool. Fixed
+identically. Also noted (not fixed) a citation-regex gap with
+comma-separated multi-ID brackets.
+**Decisions logged this run:** D-036.
+**Debug entries logged this run:** B-012 closed, B-013 new, citation
+regex gap noted as deliberately deferred.
+**Regression status:** 113/113, zero regressions.
+**Next action for next session:** re-run the fusion-vs-fission query
+once more to confirm B-013's arXiv fix actually surfaces relevant
+papers this time, not just well-formed queries. If retrieval quality is
+still poor after this, the next suspects are web_search/news_search
+result relevance or the curator's filtering — not yet investigated with
+direct evidence either way.
 
 ### Entry 019
 **Phase:** real evidence confirmed, 2 new bugs found and fixed
