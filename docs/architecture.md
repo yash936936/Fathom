@@ -39,7 +39,8 @@ fathom/
 │   │   ├── guardrail.py           # NeMo Guardrails config + input/output rail hooks
 │   │   ├── llm_backend.py         # llama-cpp-python wrapper around Qwen3-4B GGUF
 │   │   ├── state.py               # ResearchState TypedDict — shared state object
-│   │   └── ui.py                  # spinner / stage-reporter (D-027)
+│   │   ├── ui.py                  # spinner / stage-reporter (D-027)
+│   │   └── text_utils.py          # shared keyword extraction (D-034)
 │   │
 │   ├── rag/
 │   │   ├── retriever_hybrid.py    # BM25 + dense retrieval, RRF fusion

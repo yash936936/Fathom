@@ -915,5 +915,108 @@ the new `debug_report` kwarg).
 NOT yet verified: an actual `--debug` run on real hardware — this whole
 feature exists specifically because we don't yet have that evidence.
 
+### D-034 — Real evidence from --debug: three distinct root causes, three distinct fixes
+**Phase:** 6/tools, real evidence finally obtained
+**Finding 1, Reddit — confirmed broken, not intermittent:**
+`--debug` showed `reddit_search: FAILED -- HTTPError: 403 Client Error:
+Blocked` on every single call, both queries, no exceptions. This is
+structural, not flaky — Reddit is blocking unauthenticated requests
+outright regardless of a descriptive User-Agent. D-031's caveat that
+this endpoint was "more fragile than the others" turned out true
+immediately, not eventually.
+**Decision:** removed `reddit_search` from `retriever_hybrid.py`'s
+default tool list. Module and registration left in place (opt-in via
+explicit `tool_names`) in case Reddit's blocking behavior changes or an
+OAuth-based approach gets built later — not deleted, just not spending
+a doomed network round-trip on every query by default.
+**Finding 2, GitHub — 0 results, not an error:** `github_search: 0
+chunks` consistently, no failure. Root cause: sending full natural-
+language question sentences to GitHub's keyword-oriented search API —
+the same lesson as B-006, hitting a different tool this time.
+**Decision:** added query simplification before the GitHub API call.
+Rather than duplicate B-007's stopword-filtering logic a second time,
+factored it out of `rag/sufficiency.py` into a new shared
+`core/text_utils.py` (`simplify_to_keywords()`), used by both
+`sufficiency.py` (unchanged behavior, now delegating to the shared
+function) and the new `github_search.py` preprocessing step. Verified
+directly against the real failing query: `"What are the latest open
+source tools for LLM fine-tuning?"` → `"open tools llm fine-tuning"`.
+**Finding 3, refined_search_query=None — NOT a logic bug:** traced the
+exact real gap text from the debug output through the actual
+`sufficiency_node()` code in this sandbox and got a correct, non-None
+fallback result every time. The logic is right. Leading hypothesis: the
+user's local `src/rag/sufficiency.py` is a stale file from before
+D-026's fallback fix, likely because a zip re-extraction didn't
+overwrite an already-present file. NOT YET CONFIRMED — a direct
+verification step was handed to the user (grep their local file for the
+fallback function) rather than asserting this as fact without checking.
+**Files touched:** `src/core/text_utils.py` (new, shared keyword
+extractor), `src/rag/sufficiency.py` (delegates to the shared function,
+behavior unchanged, `_fallback_query_from_gap` kept as a named wrapper
+so existing test imports still work), `src/tools/github_search.py`
+(query simplification before the API call), `src/rag/retriever_hybrid.py`
+(reddit_search removed from default list).
+**Verification:** 105/105 full regression sweep, zero regressions from
+removing reddit or refactoring the fallback logic. 5 new tests directly
+covering `simplify_to_keywords()` (including against the exact real
+failing query) and confirming reddit is out / github is still in the
+default list.
+**Still open:** whether Finding 3's stale-file hypothesis is correct —
+needs the user's direct confirmation, not another guess from me.
+
+### D-035 — Stale-file theory confirmed; real evidence of genuine fixes AND one new real bug
+**Phase:** 5/6, real evidence finally complete
+**Confirmed:** the stale-file hypothesis from D-034 was correct — after
+a clean re-extraction, `grep` showed the D-026 fallback code present.
+**Confirmed working, for real, not just in tests:**
+- GitHub search (B-010 fix): 5 real chunks returned for the fine-tuning
+  query (Axolotl/Unsloth/LLaMA-Factory repos, genuinely relevant).
+- `citation_verifier` (Phase 6, D-032): ran on the agentic path and
+  reported `2 verified, 0 unverified, 0 unchecked` — first real
+  end-to-end confirmation this node functions correctly.
+- B-007's primary fix path: attempt 1's sufficiency check produced a
+  real, well-formed `refined_search_query='next-generation fission
+  reactor advances 2026'` directly from the model, correctly appended
+  to `sub_queries` for attempt 2. The mechanism genuinely works.
+**New real bug found by this exact run (B-011):** attempt 2's
+sufficiency check again showed `refined_search_query=None` despite a
+non-empty `gap`. Traced in code, not guessed: the fallback logic's
+`elif not sufficient and gap` branch was mutually exclusive with the
+`if search_query:` (rejected-too-long) branch — so when the model
+returned a search_query that was PRESENT but too long, it got rejected
+and the code never tried the gap-based fallback at all. Only the
+"search_query completely empty" case reached the fallback. Fixed by
+restructuring to a single `usable_query` variable that's only left
+`None` after BOTH the primary path and the fallback have failed, not
+after the primary path alone.
+**Also found via this run — real arXiv rate limiting, not a code bug in
+the usual sense:** every arxiv_search call after the first failed, with
+both `ReadTimeout` (arXiv itself being slow) and `HTTPError: 429`
+(arXiv rate-limiting us) appearing across the run. Root cause: the
+agentic path's multiple sub_queries × multiple retry attempts fires
+several arxiv calls in quick succession with zero throttling — arXiv's
+own documented guidance is roughly 1 request per 3 seconds, which
+nothing in `arxiv_feed.py` was respecting.
+**Fix:** added a simple module-level self-throttle to
+`tools/arxiv_feed.py` (sleep if the last call was under 3s ago) and
+raised the timeout from 10s to 20s (arXiv can genuinely be slow, not
+just rate-limiting). Not a queue or backoff/retry system — just enough
+to stop a single process hammering the endpoint.
+**GitHub returning 0 results on the fusion/fission query, unlike the
+5 it returned on the fine-tuning query — noted, not chased further:**
+no `FAILED` entry (so not an error/rate-limit), most likely genuine
+scarcity of GitHub repos matching an energy-policy topic vs. an
+ML-tooling topic. Plausible, not confirmed; not worth more
+investigation without further evidence it's actually a problem.
+**Files touched:** `src/rag/sufficiency.py` (B-011 fix),
+`src/tools/arxiv_feed.py` (throttle + timeout), `test_phase5_manual.py`
+(new B-011 regression test verified against the exact real gap/
+search_query text from this run; also fixed a test-authoring bug of my
+own — passed a bare string to `StubModel` instead of a one-item list,
+which `list()` silently iterated character-by-character).
+**Verification:** 108/108 full regression sweep, zero regressions.
+B-011's fix verified directly against the real gap and rejected
+search_query text from this exact live run, not synthetic data.
+
 ---
 **Return to `/context.md` for next steps.**

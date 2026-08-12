@@ -41,18 +41,22 @@ def retrieve(
     just makes the silence optional rather than absolute.
     """
     if tool_names is None:
-        # Per decisions.md D-031: github_search/reddit_search added to
-        # the default set on explicit user request. This is a
-        # deliberate opt-IN edit to the default list, not automatic --
-        # see D-024's original note that a badly-behaved new tool
-        # shouldn't silently join every retrieval call.
+        # Per decisions.md D-034: reddit_search REMOVED from the
+        # default set -- real-hardware testing showed it fails 100% of
+        # the time (403 Blocked on every call, not intermittent), so
+        # including it by default just spends a network round-trip on
+        # a tool that structurally cannot succeed right now. The module
+        # and its registration are left in place (opt-in via explicit
+        # tool_names) in case Reddit's blocking behavior changes or an
+        # OAuth-based approach gets built later -- see the module
+        # docstring in tools/reddit_search.py for the caveat that was
+        # already flagged (D-031) before this was confirmed.
         tool_names = [
             "web_search",
             "news_search",
             "arxiv_search",
             "curated_search",
             "github_search",
-            "reddit_search",
         ]
 
     all_chunks: list[RetrievedChunk] = []

@@ -241,5 +241,72 @@ unchanged, confirming no risk of corrupting already-correct output).
 **Closure update:** re-confirmed on real hardware with two more quick-mode
 runs — both ended on complete sentences, no truncation. B-008 is closed.
 
+### B-009 — Reddit search: 100% failure, HTTP 403 Blocked
+**Phase:** 6/tools, real-hardware `--debug` run
+**Symptom:** every `reddit_search` call failed with `403 Client Error:
+Blocked`, both test queries, zero successes.
+**Root cause:** Reddit's public `.json` endpoint blocks unauthenticated
+programmatic requests outright, regardless of User-Agent header.
+**Fix:** removed from the default retrieval tool list (see decisions.md
+D-034). Module kept, not deleted, for future opt-in use if this changes.
+**Files touched:** `src/rag/retriever_hybrid.py`.
+**Verification:** 105/105 regression sweep; new test confirms
+`reddit_search` no longer appears in the default tool list.
+
+### B-010 — GitHub search: 0 results for natural-language queries
+**Phase:** 6/tools, real-hardware `--debug` run
+**Symptom:** `github_search: 0 chunks` on both test queries, no error.
+**Root cause:** full natural-language question sentences don't match
+well against GitHub's keyword-oriented search API.
+**Fix:** added query simplification (`core/text_utils.py`'s
+`simplify_to_keywords()`) before the GitHub API call.
+**Files touched:** `src/tools/github_search.py`, `src/core/text_utils.py`
+(new).
+**Verification:** simplification tested directly against the real
+failing query (`"What are the latest open source tools for LLM
+fine-tuning?"` → `"open tools llm fine-tuning"`). Live network
+re-confirmation still needed — this fixes the query shape, not yet
+confirmed to fix the actual result count on a live GitHub API call.
+
+**Closure update:** confirmed on real hardware — 5 real chunks returned
+for the fine-tuning query. B-010 is closed.
+
+### B-011 — Fallback never ran when the model's search_query was present but rejected
+**Phase:** 5, real-hardware run (second sufficiency check in a row)
+**Symptom:** `refined_search_query=None` on a live run's second retry,
+despite a clearly non-empty `gap`.
+**Root cause:** `sufficiency_node()`'s "search_query rejected for being
+too long" branch and "fall back to gap-derived keywords" branch were
+structured as mutually exclusive (`if search_query: ... elif not
+sufficient and gap: ...`) — so a present-but-malformed search_query
+consumed the `if` branch and the fallback in the `elif` never ran. Only
+a completely EMPTY search_query reached the fallback; the actively
+worse "the model tried and got the format wrong" case silently gave up
+instead.
+**Fix:** restructured around a single `usable_query` variable, only
+left `None` after both the primary path (valid search_query) and the
+fallback (gap-derived keywords) have both failed to produce something —
+see decisions.md D-035.
+**Files touched:** `src/rag/sufficiency.py`, `test_phase5_manual.py`.
+**Verification:** fix tested directly against the exact real gap text
+and a representative rejected search_query from the live run that
+exposed it. 108/108 full regression sweep.
+
+### B-012 — arXiv rate limiting / timeouts under the agentic path's retrieval pattern
+**Phase:** 5, real-hardware run
+**Symptom:** every `arxiv_search` call after the first one failed on a
+real agentic run — mix of `ReadTimeout` (10s) and `HTTPError: 429`.
+**Root cause:** the agentic path fires one arxiv call per sub_query per
+retrieval attempt, with zero delay between them. arXiv's own guidance
+is roughly 1 request per 3 seconds; nothing in `arxiv_feed.py`
+respected that.
+**Fix:** added a module-level self-throttle (sleep if under 3s since
+the last call) and raised the timeout from 10s to 20s.
+**Files touched:** `src/tools/arxiv_feed.py`.
+**Verification:** syntax/logic verified in sandbox; the actual
+rate-limiting behavior can only be confirmed on a real run with real
+network access to arXiv — flagged as still needing that confirmation,
+not claimed as fixed from sandbox testing alone.
+
 ---
 **Return to `/context.md` for next steps.**

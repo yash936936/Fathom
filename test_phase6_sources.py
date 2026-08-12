@@ -71,6 +71,25 @@ check("reddit parser extracts score", parsed_reddit[0]["score"] == 342)
 empty_reddit = {"data": {"children": []}}
 check("reddit parser handles empty results", parse_reddit(empty_reddit) == [])
 
+# --- D-034: shared text_utils.simplify_to_keywords ---
+from core.text_utils import simplify_to_keywords
+
+simplified = simplify_to_keywords("What are the latest open source tools for LLM fine-tuning?", max_words=6)
+check(
+    "simplify_to_keywords turns a real failing query into keyword form",
+    simplified == "open tools llm fine-tuning",
+)
+check("simplify_to_keywords respects max_words cap", len(simplify_to_keywords("one two three four five six seven eight nine ten", max_words=4).split()) == 4)
+check("simplify_to_keywords handles all-stopword input without crashing", simplify_to_keywords("what is the") == "")
+
+# --- D-034: reddit_search removed from retriever_hybrid's default list ---
+import inspect
+from rag.retriever_hybrid import retrieve as retrieve_fn
+
+source = inspect.getsource(retrieve_fn)
+check("reddit_search no longer in the default tool list", '"reddit_search"' not in source.split("all_chunks")[0])
+check("github_search still in the default tool list", '"github_search"' in source)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

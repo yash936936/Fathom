@@ -8,6 +8,13 @@ for a single-user local CLI, not fine for anything higher-volume. A
 User-Agent header is mandatory (GitHub rejects unauthenticated requests
 without one).
 
+Per decisions.md D-034: real-hardware testing showed full natural-
+language question queries return ZERO results from GitHub's search --
+it wants keyword-style queries, not conversational sentences (the same
+lesson from B-006, hitting a different tool). `search()` now simplifies
+the query to keywords before sending it, via the shared
+core/text_utils.py extractor.
+
 Same sandbox caveat as web_search.py/arxiv_feed.py/news_feed.py --
 parsing logic is unit-testable against a saved fixture, not verified
 against the live endpoint in this sandbox.
@@ -18,6 +25,7 @@ from __future__ import annotations
 import requests
 
 from core.state import RetrievedChunk
+from core.text_utils import simplify_to_keywords
 from tools.registry import register_tool
 
 _GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
@@ -41,9 +49,15 @@ def _parse_results(payload: dict) -> list[dict]:
 
 
 def search(query: str, max_results: int = 5, timeout: float = 10.0) -> list[RetrievedChunk]:
+    # Simplify to keywords -- see D-034. Falls back to the original
+    # query if simplification strips everything (e.g. a query that's
+    # already just a couple of proper nouns) rather than sending an
+    # empty string to the API.
+    simplified = simplify_to_keywords(query, max_words=6) or query
+
     response = requests.get(
         _GITHUB_SEARCH_URL,
-        params={"q": query, "sort": "updated", "order": "desc", "per_page": max_results},
+        params={"q": simplified, "sort": "updated", "order": "desc", "per_page": max_results},
         headers={"User-Agent": _USER_AGENT, "Accept": "application/vnd.github+json"},
         timeout=timeout,
     )

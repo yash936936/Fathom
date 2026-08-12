@@ -9,29 +9,31 @@
 ## Current state
 - **Active phase:** Phase 6 — Hallucination/verification layer (started,
   not complete) + new source tools (GitHub, Reddit)
-- **Phase 5 status, stated precisely:** the retry-refinement bug chain
-  (B-005→B-006→B-007) is fixed and unit-tested but STILL has not had a
-  real-hardware confirmation run since B-007 landed — this was asked
-  about directly and confirmed still outstanding, not silently marked
-  done. Do not treat Phase 5 as fully confirmed.
-- **UX feature (modes/spinner):** confirmed working on real hardware
-  (Entry 013-015). B-008 (truncation) closed. D-030 (verbose simplified
-  to match quiet mode + footer) confirmed via a real clean run.
-- **New this session:** (1) D-031 — added `github_search`/
-  `reddit_search` tools (both no-API-key), declined X/Twitter with
-  reasoning (paid API required). (2) D-032 — started Phase 6:
-  `verification/citation_verifier.py` built and wired into the agentic
-  path as a new graph node, batched single-call design (not per-claim),
-  fails open on parse failure. Phase 6 explicitly NOT complete —
-  `answerability.py` and `self_consistency.py` from the original plan
-  are still unbuilt, prioritized citation_verifier first as the
-  highest-value piece.
-- **Regression status:** 105/105 across the entire test suite
-  (8 files), zero regressions from this session's changes.
-- **NOT yet verified on real hardware (growing list, stated honestly):**
-  B-007's Phase 5 fix, the new citation_verifier node in a real agentic
-  run, and the new GitHub/Reddit tools against live endpoints. None of
-  the sandbox-based verification substitutes for these.
+- **Stale-file theory CONFIRMED correct** — clean re-extraction fixed
+  it, `grep` showed the fallback code present, and a fresh real run
+  proved it out (D-035).
+- **Real, confirmed-on-hardware successes:**
+  1. **GitHub search (B-010): CLOSED.** 5 real relevant chunks returned.
+  2. **`citation_verifier` (Phase 6, D-032): first real confirmation.**
+     Ran on a live agentic query, correctly reported 2/0/0
+     verified/unverified/unchecked.
+  3. **B-007's primary fix path: confirmed genuinely working.** A real
+     run produced a real, well-formed `refined_search_query` directly
+     from the model and correctly used it on the next retry attempt.
+- **Two new real bugs found by this same run, both fixed:**
+  - **B-011:** the gap-derived fallback never ran when the model's
+    search_query was PRESENT but rejected (too long) — only the fully-
+    empty case reached it. Fixed: restructured to a single
+    `usable_query` variable, fallback now runs whenever the primary
+    path didn't produce something usable, for any reason.
+  - **B-012:** arXiv calls under the agentic path's retry loop hit real
+    rate limits (429s) and timeouts — no throttling existed. Fixed:
+    self-throttle to ~1 req/3s (arXiv's own guidance) + raised timeout
+    10s→20s. NOT yet re-confirmed on real hardware.
+- **Reddit (B-009): confirmed removed from defaults, working as
+  intended** (no wasted calls to a permanently-blocking endpoint).
+- **Regression status:** 108/108 across the entire test suite (8
+  files), zero regressions from any of this session's fixes.
 - **Latency:** still an open, unresolved-cause variance question — see
   D-029. Not re-investigated this session.
 - **Next phase:** finish Phase 6 (`answerability.py`,
@@ -47,6 +49,47 @@
 ---
 
 ## Log (newest first)
+
+### Entry 019
+**Phase:** real evidence confirmed, 2 new bugs found and fixed
+**Action taken:** clean re-extraction confirmed the stale-file theory
+was correct. Re-ran both diagnostic queries with `--debug` on genuinely
+fresh code. Confirmed three real successes (GitHub fix, citation_verifier,
+B-007's primary path) and found two new real bugs in the same run:
+B-011 (fallback logic gap — rejected-but-present search_query never
+tried the fallback) and B-012 (arXiv rate limiting/timeouts, no
+throttling existed). Fixed both.
+**Decisions logged this run:** D-035 — full evidence writeup, all
+confirmations and both new bugs.
+**Debug entries logged this run:** B-010 marked closed; B-011 and B-012
+new entries with root cause + fix + verification for each.
+**Regression status:** 108/108, zero regressions.
+**Next action for next session:** (1) commit everything per the split
+convention already given (this session's B-011/B-012 fixes need their
+own commit on top of the earlier D-027-D-034 batch), (2) re-run the
+fusion-vs-fission query once more to confirm B-011's fix produces a
+real refined query on the SECOND sufficiency check too (only the first
+was confirmed working before this fix), (3) confirm B-012's arXiv
+throttle actually eliminates the 429s/timeouts on a real run — sandbox
+can't verify real network rate-limiting behavior.
+
+### Entry 018
+**Phase:** real evidence obtained, 3 fixes applied
+**Action taken:** got real `--debug` output for both open questions.
+Found and fixed two genuine bugs (Reddit's 403-on-every-call, GitHub's
+natural-language-query mismatch) and traced a third symptom
+(`refined_search_query=None`) to almost certainly be a stale local file
+rather than a logic defect — verified the actual code is correct in
+this sandbox, handed the user a direct check rather than asserting.
+**Decisions logged this run:** D-034 — all three findings and fixes.
+**Debug entries logged this run:** B-009 (Reddit), B-010 (GitHub).
+**Regression status:** 105/105, zero regressions.
+**Next action for next session:** (1) user to check whether their local
+`src/rag/sufficiency.py` has the D-026 fallback code — if stale, a full
+clean re-extraction (not a merge over the old folder) should resolve
+B-007 without any further code changes. (2) re-run both `--debug`
+queries after a clean sync to see if GitHub now returns results and
+whether B-007 actually resolves once the stale-file question is settled.
 
 ### Entry 017
 **Phase:** debuggability fix, blocking on real evidence

@@ -79,13 +79,20 @@ state = sufficiency_node(state, model)
 check("sufficiency_node sets state fields", state["sufficiency"] is False and state["sufficiency_gap"] == "missing recent data")
 check("sufficiency_node sets refined_search_query separately from gap", state["refined_search_query"] == "recent fusion energy news")
 
-# --- B-006 regression: a prose "search_query" gets rejected, not used as-is ---
+# --- B-006 regression: a prose "search_query" is rejected as-is, not
+# passed through verbatim -- but per B-011's fix, it should still fall
+# through to the gap-derived fallback rather than giving up entirely.
 model = StubModel(['{"sufficient": false, "gap": "missing data", "search_query": "This is a full sentence explanation, not a real search query at all"}'])
 state2 = new_state("q")
 state2 = sufficiency_node(state2, model)
 check(
-    "prose-shaped search_query (>8 words) is rejected, not passed through",
-    state2["refined_search_query"] is None and "sufficiency_search_query_rejected_not_query_shaped" in state2["guardrail_flags"],
+    "prose-shaped search_query (>8 words) is rejected outright, never used verbatim",
+    state2["refined_search_query"] != "This is a full sentence explanation, not a real search query at all"
+    and "sufficiency_search_query_rejected_not_query_shaped" in state2["guardrail_flags"],
+)
+check(
+    "rejected prose still falls through to a short gap-derived fallback (B-011)",
+    state2["refined_search_query"] == "missing data",
 )
 
 # --- D-026 regression: real-hardware run showed the model sometimes
@@ -101,6 +108,23 @@ check(
     state3["refined_search_query"] is not None
     and len(state3["refined_search_query"].split()) <= 8
     and "refined_search_query_derived_from_gap_fallback" in state3["guardrail_flags"],
+)
+
+# --- B-011 regression: fallback must ALSO trigger when the model's
+# search_query is PRESENT but rejected (too long), not just when empty.
+# Real bug found on a live run -- the old code only fell back to the
+# gap-derived query in the empty case, silently giving up in the
+# rejected case instead. ---
+too_long_search_query = "a full sentence explaining the comparison gap in detail rather than a short query"
+model4 = StubModel([f'{{"sufficient": false, "gap": "{real_world_gap}", "search_query": "{too_long_search_query}"}}'])
+state4 = new_state("q")
+state4 = sufficiency_node(state4, model4)
+check(
+    "B-011: rejected (too-long) search_query still falls through to the gap-based fallback",
+    state4["refined_search_query"] is not None
+    and len(state4["refined_search_query"].split()) <= 8
+    and "sufficiency_search_query_rejected_not_query_shaped" in state4["guardrail_flags"]
+    and "refined_search_query_derived_from_gap_fallback" in state4["guardrail_flags"],
 )
 check("should_retry True when insufficient and under cap", should_retry(state) is True)
 

@@ -59,5 +59,49 @@ a plan in `phases.md`):
 - Do not jump directly into a `docs/*.md` file without having read
   `context.md` first in the current session.
 
+## 7. Git commit convention
+One commit per logically-independent change, not one commit per session
+or per phase. If a session produces work spanning multiple `decisions.md`
+entries with genuinely separate reasoning (e.g. a UX feature plus an
+unrelated bug fix found while testing it), that's multiple commits, not
+one. A commit message should let someone reconstruct *why* from git log
+alone, without needing to cross-reference `decisions.md` first — the ID
+is a pointer for full detail, not a substitute for a real description.
+
+Format:
+```
+<short imperative summary> (D-XXX[, B-XXX])
+
+<1-3 sentences: what changed and why, in plain terms — not just a
+restatement of the D-XXX title>
+```
+
+Examples matching this project's actual history:
+```
+Add quick/deep modes, spinner UI, verbose flag (D-027)
+
+Quick mode skips the domain-gate LLM call and caps output length to
+minimize latency as much as structurally possible on CPU-only hardware
+-- not a guaranteed time ceiling, see D-027 for why one isn't promised.
+```
+```
+Fix Reddit 403s and GitHub zero-results; extract shared text_utils (D-034, B-009, B-010)
+
+Reddit blocks unauthenticated requests outright (100% failure, not
+flaky) -- removed from the default tool list, module kept for future
+opt-in use. GitHub's search API doesn't match natural-language question
+sentences -- added query simplification via a new shared keyword
+extractor, also used by rag/sufficiency.py's existing fallback logic.
+```
+
+Group by "what shipped together and was reasoned about together," not
+by file touched or by calendar session. A single session's work often
+becomes several commits; a single commit should never span unrelated
+D-XXX entries just because they landed in the same conversation.
+
+Commit `docs/` changes alongside the code they document, not separately
+— a decisions.md entry describing a fix and the fix itself belong in
+one commit, so `git log` and `git show` stay self-contained.
+
 ---
 **Return to `/context.md` for next steps.**

@@ -5,6 +5,15 @@ No API key required (arXiv's export API is open). Directly relevant to
 prd.md's "keeping up with latest trends" requirement for research
 literature specifically.
 
+Per decisions.md D-035: real-hardware testing under the agentic path's
+multiple sub_queries x multiple retry attempts fired several arxiv
+calls in quick succession with no throttling, reliably triggering
+ReadTimeouts and HTTP 429s -- arXiv's documented guideline is roughly
+one request per 3 seconds, and nothing here was respecting it. A simple
+module-level self-throttle (sleep if the last call was too recent) is
+added below -- not a queue or backoff/retry system, just enough to stop
+hammering the endpoint from a single process.
+
 Same sandbox caveat as web_search.py: export.arxiv.org isn't reachable
 in the environment this was written in -- parsing logic is unit-tested
 against a saved sample response instead of the live endpoint.
@@ -12,6 +21,7 @@ against a saved sample response instead of the live endpoint.
 
 from __future__ import annotations
 
+import time
 import xml.etree.ElementTree as ET
 
 import requests
@@ -21,6 +31,23 @@ from tools.registry import register_tool
 
 _ARXIV_API_URL = "http://export.arxiv.org/api/query"
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+# arXiv's own guidance: no more than one request per 3 seconds. This is
+# a floor, not a target -- under the agentic path's retry loop, this
+# adds real wall-clock time (up to ~3s per call) but that's a small
+# fraction of this project's already-accepted per-call latency (D-022),
+# and a guaranteed failure (429/timeout) costs more time overall than a
+# deliberate short wait.
+_MIN_INTERVAL_SECONDS = 3.0
+_last_call_time: float = 0.0
+
+
+def _throttle() -> None:
+    global _last_call_time
+    elapsed = time.monotonic() - _last_call_time
+    if elapsed < _MIN_INTERVAL_SECONDS:
+        time.sleep(_MIN_INTERVAL_SECONDS - elapsed)
+    _last_call_time = time.monotonic()
 
 
 def _parse_atom(xml_text: str) -> list[dict[str, str]]:
@@ -42,7 +69,8 @@ def _parse_atom(xml_text: str) -> list[dict[str, str]]:
     return entries
 
 
-def search(query: str, max_results: int = 5, timeout: float = 10.0) -> list[RetrievedChunk]:
+def search(query: str, max_results: int = 5, timeout: float = 20.0) -> list[RetrievedChunk]:
+    _throttle()
     params = {
         "search_query": f"all:{query}",
         "start": 0,

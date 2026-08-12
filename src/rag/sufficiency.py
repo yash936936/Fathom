@@ -14,6 +14,7 @@ import json
 
 from core.llm_backend import FathomModel
 from core.state import ResearchState
+from core.text_utils import simplify_to_keywords
 
 MAX_RETRIES = 2  # per code_logic.md §4 -- "2-3 retries then proceed
 # best-effort with caveat." Set to the lower end given decisions.md
@@ -36,20 +37,6 @@ Example of a good response when evidence is insufficient:
 {"sufficient": false, "gap": "no sources discuss small modular reactor progress", "search_query": "small modular reactor 2026 news"}
 """
 
-# Common filler/connective words to strip when deriving a fallback query
-# from the prose `gap` field -- see decisions.md D-026. Deliberately a
-# short, unglamorous list; this is a bounded heuristic, not an NLP
-# pipeline, and doesn't need to be exhaustive to be useful.
-_STOPWORDS = {
-    "the", "a", "an", "is", "are", "was", "were", "does", "do", "did",
-    "not", "no", "none", "any", "of", "in", "on", "at", "to", "for",
-    "and", "or", "but", "with", "about", "from", "by", "this", "that",
-    "these", "those", "it", "its", "as", "be", "been", "being", "have",
-    "has", "had", "provided", "evidence", "sources", "source", "given",
-    "information", "covered", "cover", "discuss", "discussed", "topic",
-    "content", "mentioned", "unrelated", "specific", "specifically",
-}
-
 
 def _fallback_query_from_gap(gap: str, max_words: int = 8) -> str:
     """Cheap, bounded, LLM-free keyword extraction -- used only when the
@@ -57,10 +44,14 @@ def _fallback_query_from_gap(gap: str, max_words: int = 8) -> str:
     rejected for being too long). Better than giving up on refinement
     entirely, and safer than B-006's mistake since it's capped at
     max_words the same way the primary path is validated.
+
+    Thin wrapper around core/text_utils.py's shared implementation --
+    factored out per decisions.md D-034 once tools/github_search.py
+    needed the identical logic. Kept as a named function here (not
+    inlined) so existing imports/tests referencing
+    rag.sufficiency._fallback_query_from_gap keep working.
     """
-    words = [w.strip(".,!?;:\"'()") for w in gap.lower().split()]
-    keywords = [w for w in words if w and w not in _STOPWORDS and len(w) > 2]
-    return " ".join(keywords[:max_words])
+    return simplify_to_keywords(gap, max_words=max_words)
 
 
 class SufficiencyCheckError(RuntimeError):
@@ -122,25 +113,37 @@ def sufficiency_node(state: ResearchState, model: FathomModel) -> ResearchState:
     # check -- reject anything that looks like prose (too many words) --
     # since a bad "refined" query actively hurts retrieval (sends noise
     # to search APIs) rather than just being a no-op like an empty one.
+    #
+    # B-011 fix: the model-provided search_query and the gap-derived
+    # fallback are NOT mutually exclusive alternatives -- a real live
+    # run showed the model returning a too-long search_query (rejected)
+    # on a later retry, and the OLD code treated "search_query present
+    # but rejected" and "search_query empty" as different branches,
+    # only falling back to the gap-derived query in the empty case. That
+    # meant a malformed-but-present search_query silently ate the
+    # fallback entirely -- worse than having no search_query at all.
+    # Now: try the model's query first; if it's unusable for ANY reason
+    # (empty or rejected), always attempt the fallback.
+    usable_query: str | None = None
     if search_query and len(search_query.split()) <= 8:
-        state["refined_search_query"] = search_query
-    else:
-        state["refined_search_query"] = None
-        if search_query:
-            state.setdefault("guardrail_flags", []).append("sufficiency_search_query_rejected_not_query_shaped")
-        elif not sufficient and gap:
-            # Per decisions.md D-026: real-hardware testing showed the
-            # model often returns an EMPTY search_query even when
-            # correctly told to always provide one -- silently falling
-            # back to "no refinement" here would recreate B-005's
-            # original problem (retries that don't search for anything
-            # new), just without B-006's actively-harmful version. Derive
-            # a bounded, LLM-free fallback from `gap` instead of giving up.
-            fallback = _fallback_query_from_gap(gap)
-            if fallback:
-                state["refined_search_query"] = fallback
-                state.setdefault("guardrail_flags", []).append("refined_search_query_derived_from_gap_fallback")
+        usable_query = search_query
+    elif search_query:
+        state.setdefault("guardrail_flags", []).append("sufficiency_search_query_rejected_not_query_shaped")
 
+    if usable_query is None and not sufficient and gap:
+        # Per decisions.md D-026: real-hardware testing showed the
+        # model often returns an EMPTY (or, per B-011, a malformed)
+        # search_query even when correctly told to always provide a
+        # usable one -- silently falling back to "no refinement" here
+        # would recreate B-005's original problem (retries that don't
+        # search for anything new). Derive a bounded, LLM-free fallback
+        # from `gap` instead of giving up.
+        fallback = _fallback_query_from_gap(gap)
+        if fallback:
+            usable_query = fallback
+            state.setdefault("guardrail_flags", []).append("refined_search_query_derived_from_gap_fallback")
+
+    state["refined_search_query"] = usable_query
     return state
 
 
