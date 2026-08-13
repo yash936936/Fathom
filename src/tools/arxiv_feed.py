@@ -82,7 +82,17 @@ def search(query: str, max_results: int = 5, timeout: float = 20.0) -> list[Retr
         "search_query": f"all:{simplified}",
         "start": 0,
         "max_results": max_results,
-        "sortBy": "submittedDate",
+        # Per decisions.md D-037: sortBy="submittedDate" was the DEEPER
+        # bug B-013's keyword-simplification fix didn't catch. arXiv's
+        # `all:` field does loose/broad term matching, not strict AND --
+        # sorting those loose matches by recency instead of relevance
+        # surfaces the newest paper that shares even one stray word,
+        # not the most topically relevant one. Sort by relevance here;
+        # recency weighting is already handled downstream by
+        # rag/reranker.py's requires_recency boost, so this isn't losing
+        # the freshness requirement (prd.md), just not doing it at the
+        # expense of relevance at the retrieval step itself.
+        "sortBy": "relevance",
         "sortOrder": "descending",
     }
     response = requests.get(_ARXIV_API_URL, params=params, timeout=timeout)

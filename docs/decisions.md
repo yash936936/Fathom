@@ -1051,5 +1051,46 @@ Live network re-confirmation of the actual result relevance still
 needed — sandbox can verify the query transformation, not whether
 arXiv's results genuinely improve.
 
+### D-037 — B-013's fix confirmed deployed but insufficient; deeper root cause found by cloning the real repo
+**Phase:** 6/tools, fifth real verification round
+**Finding:** re-ran the fusion-vs-fission query after B-013's fix —
+arXiv results were STILL irrelevant, byte-for-byte the same failure
+pattern as before. Rather than assume a stale file again, cloned the
+actual live GitHub repo directly (`git clone` — allowed network domain
+in this sandbox) and confirmed the B-013 fix genuinely is deployed,
+correct, matching what was written. So the fix works as designed but
+doesn't solve the actual problem — a different, deeper bug.
+**Real root cause:** `arxiv_feed.py` was sorting by
+`sortBy="submittedDate"` (most recent first), not relevance. arXiv's
+`all:` field does loose/broad term matching, not strict AND — so
+sorting those loose matches by recency instead of relevance surfaces
+the NEWEST paper that shares even one stray word with the query, not
+the most topically relevant one. This is architecturally distinct from
+B-013 (query phrasing) — B-013 was a real, correct fix for a real
+problem, it just wasn't the ONLY problem.
+**Fix:** changed to `sortBy="relevance"`. Recency isn't lost — it's
+already handled downstream by `rag/reranker.py`'s `requires_recency`
+boost (built back in Phase 3/D-019), so sorting arXiv itself by
+relevance and letting the reranker apply recency weighting afterward is
+the correct division of responsibility, not a regression against
+`prd.md`'s freshness requirement.
+**Correction to my own error in this same turn:** I initially claimed
+`github_search.py` was missing from the cloned repo based on a
+misread `find` output — direct `ls` immediately after showed it was
+present and correct. Stated here so the record doesn't carry a false
+claim uncorrected.
+**Process note, not a bug:** the user's single commit
+(`"Fix arXiv result relevance with query simplification"`) actually
+contains all of D-027 through D-036 (54 files) — the message
+undersells its own contents. Not fixed in code, just noted for future
+commits to follow the split convention from `workflow.md` §7 rather
+than one large squash.
+**Files touched:** `src/tools/arxiv_feed.py`.
+**Verification:** 113/113 full regression sweep, zero regressions.
+Verified the actual deployed code by cloning the real repository
+directly rather than asking the user to grep locally — a more reliable
+verification method than prior rounds, now established for future use
+if this class of confusion recurs.
+
 ---
 **Return to `/context.md` for next steps.**

@@ -9,20 +9,23 @@
 ## Current state
 - **Active phase:** Phase 6 — Hallucination/verification layer (started,
   not complete) + new source tools (GitHub, Reddit)
-- **B-011 and B-012 BOTH fully confirmed on real hardware** — the exact
-  broken case (second sufficiency check returning None) now produces a
-  real refined query; every arxiv_search call succeeded, zero
-  429s/timeouts across an entire run. Both closed.
-- **B-013 found and fixed in the same run:** arXiv results were still
-  irrelevant despite successful calls — same root cause as B-010
-  (natural-language sentences sent raw to a keyword-oriented search),
-  just never applied to arxiv_feed.py until now. Fixed identically.
-- **Noted, deliberately not fixed:** citation regex misses comma-
-  separated multi-ID brackets (`[arxiv:2, arxiv:3]`) — undercounts
-  citations, doesn't cause false grounding. Logged, not urgent.
-- **Prior real, confirmed-on-hardware successes (still standing):**
-  GitHub search (B-010, closed), `citation_verifier` (Phase 6, first
-  real confirmation), B-007's primary fix path, Reddit removal (B-009).
+- **B-013's fix confirmed genuinely deployed (via direct repo clone,
+  not a stale-file re-run) but insufficient on its own.** Root cause
+  was deeper: `arxiv_feed.py` sorted by recency instead of relevance,
+  undermining even a correctly-simplified query. Fixed as B-014
+  (`sortBy="relevance"`). NOT yet re-confirmed on real hardware.
+- **B-011 and B-012 remain confirmed fixed** (unaffected by this
+  round's finding).
+- **Process note:** the user's single commit contains all of D-027
+  through D-036, message undersells its contents — not a bug, just a
+  reminder to use the split-commit convention going forward.
+- **Correction on record:** I incorrectly claimed `github_search.py`
+  was missing from the cloned repo (misread `find` output) — direct
+  `ls` immediately showed it present and correct. Noted so the record
+  doesn't carry the false claim silently.
+- **New verification method established:** cloning the actual GitHub
+  repo directly (network-permitted in this sandbox) is more reliable
+  than asking for local greps when stale-file confusion recurs.
 - **Regression status:** 113/113 across the entire test suite (8
   files), zero regressions from any fix in this whole thread.
 - **Latency:** still an open, unresolved-cause variance question — see
@@ -40,6 +43,24 @@
 ---
 
 ## Log (newest first)
+
+### Entry 021
+**Phase:** B-013 confirmed deployed, B-014 found and fixed
+**Action taken:** user reported B-013's fix appeared not to work.
+Instead of guessing or re-asking for local greps, cloned the actual
+live GitHub repo directly. Confirmed B-013 genuinely deployed and
+correct — the real problem was one level deeper: arXiv sorting by
+recency instead of relevance, undermining even a well-simplified query.
+Fixed as B-014. Also caught and corrected my own misreading of a `find`
+command that briefly claimed a file was missing when it wasn't.
+**Decisions logged this run:** D-037.
+**Debug entries logged this run:** B-014.
+**Regression status:** 113/113, zero regressions.
+**Next action for next session:** re-run the fusion-vs-fission query
+one more time to confirm B-014 actually surfaces relevant arXiv papers.
+Also worth doing: commit this fix using the split convention (not
+another squash), and consider whether to fix the comma-separated
+citation regex gap noted in the previous entry.
 
 ### Entry 020
 **Phase:** B-011/B-012 confirmed; B-013 found and fixed

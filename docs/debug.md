@@ -341,5 +341,20 @@ B-011's category of bug.
 silently expanding scope. Worth a small regex/parsing fix in a future
 pass if this format recurs often enough to matter.
 
+### B-014 — arXiv sorted by recency instead of relevance, undermining B-013's fix
+**Phase:** 6, real-hardware run after B-013
+**Symptom:** identical irrelevant-results pattern persisted even after
+B-013's query-simplification fix, confirmed genuinely deployed via a
+direct repo clone (not a stale-file issue this time).
+**Root cause:** `sortBy="submittedDate"` in `arxiv_feed.py` sorts loose/
+broad `all:` field matches by recency, surfacing the newest paper
+sharing even one stray word rather than the most topically relevant.
+**Fix:** changed to `sortBy="relevance"`. Recency handling stays intact
+via `rag/reranker.py`'s existing `requires_recency` boost downstream.
+**Files touched:** `src/tools/arxiv_feed.py`.
+**Verification:** 113/113 regression sweep. Live re-confirmation on
+real hardware still needed — sandbox can't verify actual arXiv result
+relevance, only that the code change is syntactically sound.
+
 ---
 **Return to `/context.md` for next steps.**
