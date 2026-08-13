@@ -1092,5 +1092,47 @@ directly rather than asking the user to grep locally — a more reliable
 verification method than prior rounds, now established for future use
 if this class of confusion recurs.
 
+### D-038 — B-014 confirmed working; found and fixed a real source_id collision bug (B-015)
+**Phase:** 6, sixth real verification round
+**B-014 confirmed:** the fine-tuning query returned a fully coherent,
+well-grounded answer citing 5 valid GitHub repos plus web sources. The
+fusion/fission query's arXiv calls all succeeded, though this
+particular run's final answer happened to cite no arXiv sources at all
+(not itself concerning — depends on what actually ranked highest).
+**New finding: literal source_id collision, spotted directly in the
+Sources output** — `[news:0]` appeared twice, pointing to two
+completely different real articles. Traced to a real, previously
+unnoticed bug: every individual tool module (`tools/news_feed.py`, etc.)
+numbers its own results starting at 0 per call. The fast path only ever
+calls `retrieve()` once, so this never surfaces there — but the agentic
+path accumulates results across multiple sub_queries AND multiple retry
+attempts (`rag/graph.py`'s `retrieval_node`), and `dedupe()` only checks
+`(source, content)` uniqueness, never `source_id`. Two genuinely
+different chunks from different `retrieve()` calls can end up sharing a
+literal ID.
+**Why this matters beyond display confusion:** `verification/
+citation_verifier.py` builds `{c["source_id"]: c for c in chunks}` — a
+dict, so a collision silently shadows one of the two chunks. A citation
+could be checked against the WRONG source's text entirely. This is a
+plausible real explanation for this exact run's "1 unverified" citation,
+though not confirmed as the specific cause without deeper tracing —
+stated as plausible, not certain.
+**Fix:** added `renumber_source_ids()` to `rag/retriever_hybrid.py`,
+called right after `dedupe()` in `retrieval_node` — reassigns every
+chunk a fresh, globally-unique ID within the accumulated list, preserving
+the original type prefix (`news:`, `web:`, etc.) for readability. Not
+applied to the fast path, which doesn't need it (single `retrieve()`
+call, no accumulation, no collision risk).
+**Files touched:** `src/rag/retriever_hybrid.py`, `src/rag/graph.py`,
+`test_phase5_graph.py`.
+**Verification:** reproduced the EXACT real collision (two chunks both
+"news:0", different content) directly and confirmed the fix resolves it
+(`news:0`/`news:1`). Added a properly targeted regression test using a
+retrieve stub that resets its ID counter every call (mimicking real
+tool behavior) — the earlier accumulation test's stub used a global
+counter and never actually exercised this bug, worth noting as a gap in
+my own prior test design, not just the code. 116/116 full regression
+sweep.
+
 ---
 **Return to `/context.md` for next steps.**

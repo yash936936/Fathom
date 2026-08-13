@@ -24,7 +24,7 @@ from core.state import ResearchState
 from rag.curator import curate
 from rag.planner import plan_node
 from rag.reranker import rerank
-from rag.retriever_hybrid import dedupe, retrieve
+from rag.retriever_hybrid import dedupe, renumber_source_ids, retrieve
 from rag.sufficiency import should_retry, sufficiency_node
 from rag.synthesis import generate
 from verification import citation_verifier
@@ -72,7 +72,13 @@ def build_graph(
         # sub_queries. See decisions.md D-024 -- this was a real bug
         # found in the first live run, not a pre-planned design choice.
         combined = state.get("retrieved_chunks", []) + new_chunks
-        state["retrieved_chunks"] = dedupe(combined)
+        # dedupe() then renumber_source_ids() -- see decisions.md D-038.
+        # Order matters: dedupe first (drops true duplicates by content),
+        # THEN renumber (guarantees the survivors have unique IDs, since
+        # each individual retrieve() call numbers its own results from 0
+        # and accumulation across attempts/sub_queries can otherwise
+        # collide two different chunks onto the same "news:0"-style ID).
+        state["retrieved_chunks"] = renumber_source_ids(dedupe(combined))
         return state
 
     def rerank_filter_node(state: ResearchState) -> ResearchState:

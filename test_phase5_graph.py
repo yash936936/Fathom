@@ -137,6 +137,62 @@ with patch("rag.graph.retrieve", side_effect=incrementing_retrieve):
         len(final_state4.get("retrieved_chunks", [])) == 3,
     )
 
+    # --- B-015 regression: source_id collisions must not survive
+    # accumulation across retrieval attempts. Real bug caught on a live
+    # run -- two genuinely different chunks ended up sharing the same
+    # source_id (e.g. "news:0") since each individual tool call numbers
+    # its own results starting at 0.
+    final_ids = [c["source_id"] for c in final_state4.get("retrieved_chunks", [])]
+    check(
+        "B-015: no duplicate source_ids survive into the final accumulated chunk list",
+        len(final_ids) == len(set(final_ids)),
+    )
+
+# --- Test 5: B-015, targeted -- a retrieve() stub that resets its
+# source_id counter every call (mimicking real tools/*.py behavior,
+# unlike incrementing_retrieve above which used a global counter and
+# so never actually exercised the collision this bug produced) ---
+def reset_per_call_retrieve(query, tool_names=None, max_results_per_tool=5, debug_report=None):
+    # Always returns "news:0" -- exactly like a real tool call would,
+    # since each individual tools/*.py module numbers its own results
+    # starting at 0 every time it's invoked.
+    return [
+        RetrievedChunk(
+            source_id="news:0",
+            content=f"distinct real content about {query}",
+            source=f"Source for {query}",
+            url=None,
+            date=None,
+            relevance_score=None,
+        )
+    ]
+
+
+with patch("rag.graph.retrieve", side_effect=reset_per_call_retrieve):
+    from rag.graph import run_agentic as run_agentic_5
+
+    model5 = StubModel(
+        [
+            '{"sub_queries": ["query A"], "requires_recency": false}',
+            '{"sufficient": false, "gap": "need more", "search_query": "query B"}',
+            '{"sufficient": true, "gap": ""}',
+            "Answer citing both [news:0][news:1].",
+            '[{"index": 0, "supported": true}, {"index": 1, "supported": true}]',
+        ]
+    )
+    final_state5 = run_agentic_5("original query", model5)
+    ids5 = [c["source_id"] for c in final_state5.get("retrieved_chunks", [])]
+    check(
+        "B-015 (targeted): two chunks that would collide as 'news:0' both from "
+        "real per-call-reset retrieve() calls end up with distinct source_ids",
+        len(ids5) == 2 and len(set(ids5)) == 2,
+    )
+    contents5 = [c["content"] for c in final_state5.get("retrieved_chunks", [])]
+    check(
+        "B-015 (targeted): both distinct underlying chunks are preserved, not one shadowing the other",
+        len(set(contents5)) == 2,
+    )
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

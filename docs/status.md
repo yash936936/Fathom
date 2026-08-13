@@ -9,24 +9,28 @@
 ## Current state
 - **Active phase:** Phase 6 — Hallucination/verification layer (started,
   not complete) + new source tools (GitHub, Reddit)
-- **B-013's fix confirmed genuinely deployed (via direct repo clone,
-  not a stale-file re-run) but insufficient on its own.** Root cause
-  was deeper: `arxiv_feed.py` sorted by recency instead of relevance,
-  undermining even a correctly-simplified query. Fixed as B-014
-  (`sortBy="relevance"`). NOT yet re-confirmed on real hardware.
+- **B-013/B-014 CONFIRMED CLOSED** — fine-tuning query returned a fully
+  coherent, well-grounded answer; all 4 tools succeeded on the fusion
+  query too.
+- **New real bug found and fixed: B-015 (source_id collisions).** Live
+  run showed `[news:0]` literally pointing to two different articles.
+  Root cause: agentic-path accumulation across sub_queries/retries can
+  collide two different chunks onto the same ID, since each tool call
+  numbers its own results from 0 and `dedupe()` never checked
+  `source_id`. Real correctness risk: `citation_verifier`'s ID-keyed
+  dict would silently shadow one chunk, potentially verifying a citation
+  against the wrong source. Fixed with `renumber_source_ids()`, applied
+  after `dedupe()` in the agentic path only (fast path doesn't need it).
+  Verified by reproducing the exact real collision directly.
 - **B-011 and B-012 remain confirmed fixed** (unaffected by this
   round's finding).
 - **Process note:** the user's single commit contains all of D-027
   through D-036, message undersells its contents — not a bug, just a
   reminder to use the split-commit convention going forward.
-- **Correction on record:** I incorrectly claimed `github_search.py`
-  was missing from the cloned repo (misread `find` output) — direct
-  `ls` immediately showed it present and correct. Noted so the record
-  doesn't carry the false claim silently.
 - **New verification method established:** cloning the actual GitHub
   repo directly (network-permitted in this sandbox) is more reliable
   than asking for local greps when stale-file confusion recurs.
-- **Regression status:** 113/113 across the entire test suite (8
+- **Regression status:** 116/116 across the entire test suite (8
   files), zero regressions from any fix in this whole thread.
 - **Latency:** still an open, unresolved-cause variance question — see
   D-029. Not re-investigated this session.
@@ -43,6 +47,25 @@
 ---
 
 ## Log (newest first)
+
+### Entry 022
+**Phase:** B-013/B-014 confirmed closed; B-015 found and fixed
+**Action taken:** user re-ran both diagnostic queries. Fine-tuning query
+came back fully coherent and well-grounded. Fusion query's tools all
+succeeded, but the final Sources list revealed a real, previously
+unnoticed bug on inspection — `[news:0]` pointed to two different
+articles. Traced to source_id collisions after cross-attempt
+accumulation on the agentic path, fixed with a renumbering step.
+**Decisions logged this run:** D-038.
+**Debug entries logged this run:** B-013/B-014 closed, B-015 new.
+**Regression status:** 116/116, zero regressions. New test specifically
+designed to exercise the collision (unlike an earlier test whose stub
+happened to avoid it by construction).
+**Next action for next session:** re-run the fusion-vs-fission query
+once more to confirm no more duplicate source_ids appear, and commit
+this fix (split convention, not another squash). Separately: the
+comma-separated citation regex gap from Entry 021 remains unfixed and
+un-prioritized — worth a decision on whether it's worth addressing.
 
 ### Entry 021
 **Phase:** B-013 confirmed deployed, B-014 found and fixed

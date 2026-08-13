@@ -356,5 +356,32 @@ via `rag/reranker.py`'s existing `requires_recency` boost downstream.
 real hardware still needed — sandbox can't verify actual arXiv result
 relevance, only that the code change is syntactically sound.
 
+**Closure update:** confirmed working on real hardware — the
+fine-tuning query returned a fully coherent answer, all 4 tools
+succeeded. B-013/B-014 taken together are closed.
+
+### B-015 — Duplicate source_ids after cross-attempt accumulation on the agentic path
+**Phase:** 6, real-hardware run
+**Symptom:** live run's final Sources list showed `[news:0]` twice,
+pointing to two different real articles.
+**Root cause:** each `tools/*.py` module numbers its own results
+starting at 0 per call. `rag/graph.py`'s `retrieval_node` accumulates
+chunks across multiple sub_queries and retry attempts;
+`retriever_hybrid.dedupe()` only checks `(source, content)` uniqueness,
+never `source_id` — so two different chunks from different calls can
+end up sharing an ID after accumulation. `verification/
+citation_verifier.py`'s `chunks_by_id` dict then silently shadows one
+of them, risking a citation being verified against the wrong source.
+**Fix:** added `renumber_source_ids()` to `retriever_hybrid.py`, called
+after `dedupe()` in `retrieval_node` — reassigns globally-unique IDs
+within the accumulated list, preserving the type prefix.
+**Files touched:** `src/rag/retriever_hybrid.py`, `src/rag/graph.py`,
+`test_phase5_graph.py`.
+**Verification:** reproduced the exact real collision directly and
+confirmed the fix resolves it. Added a properly targeted test (a
+retrieve stub that resets its ID counter per call, unlike the earlier
+test's stub which used a global counter and never actually exercised
+this bug). 116/116 full regression sweep.
+
 ---
 **Return to `/context.md` for next steps.**

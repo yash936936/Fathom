@@ -95,3 +95,32 @@ def dedupe(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         seen.add(key)
         deduped.append(chunk)
     return deduped
+
+
+def renumber_source_ids(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+    """Reassigns every chunk's source_id to be globally unique across
+    the whole list, preserving each chunk's original type prefix
+    (news:, web:, arxiv:, etc.) for readability.
+
+    Per decisions.md D-038: each individual tool call (tools/*.py)
+    numbers its own results starting at 0 -- fine for a single retrieve()
+    call, but the agentic path (rag/graph.py) accumulates results across
+    multiple sub_queries AND multiple retry attempts, and dedupe() only
+    checks (source, content) uniqueness, never source_id. Two genuinely
+    different chunks from different retrieve() calls can end up sharing
+    a literal source_id like "news:0" -- confusing to display, and a
+    real correctness bug: citation_verifier.py and rag/synthesis.py both
+    build source_id-keyed dicts/sets, which silently shadow one of the
+    colliding chunks, risking a citation being checked against the
+    WRONG source's text. Call this after dedupe() whenever chunks may
+    have been accumulated across more than one retrieve() call -- not
+    needed on the fast path, which only ever calls retrieve() once.
+    """
+    counters: dict[str, int] = {}
+    renumbered: list[RetrievedChunk] = []
+    for chunk in chunks:
+        prefix = chunk["source_id"].split(":", 1)[0]
+        idx = counters.get(prefix, 0)
+        counters[prefix] = idx + 1
+        renumbered.append({**chunk, "source_id": f"{prefix}:{idx}"})
+    return renumbered
