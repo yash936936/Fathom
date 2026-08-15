@@ -7,46 +7,86 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 6 — Hallucination/verification layer (started,
-  not complete) + new source tools (GitHub, Reddit)
-- **B-013/B-014 CONFIRMED CLOSED** — fine-tuning query returned a fully
-  coherent, well-grounded answer; all 4 tools succeeded on the fusion
-  query too.
-- **New real bug found and fixed: B-015 (source_id collisions).** Live
-  run showed `[news:0]` literally pointing to two different articles.
-  Root cause: agentic-path accumulation across sub_queries/retries can
-  collide two different chunks onto the same ID, since each tool call
-  numbers its own results from 0 and `dedupe()` never checked
-  `source_id`. Real correctness risk: `citation_verifier`'s ID-keyed
-  dict would silently shadow one chunk, potentially verifying a citation
-  against the wrong source. Fixed with `renumber_source_ids()`, applied
-  after `dedupe()` in the agentic path only (fast path doesn't need it).
-  Verified by reproducing the exact real collision directly.
-- **B-011 and B-012 remain confirmed fixed** (unaffected by this
-  round's finding).
+- **Active phase:** Phase 7 — Short-term memory (built, code-complete,
+  not yet real-hardware verified)
+- **Phase 6 status:** still not complete — `citation_verifier.py` is
+  built and confirmed working; `answerability.py` and
+  `self_consistency.py` remain unbuilt. Not blocking Phase 7 work.
+- **B-016/B-017 both fixed** (comma-in-bracket citation format, recurred
+  in real usage, fixed with the same claim-sharing mechanism as B-016).
+  All of B-011 through B-017 confirmed/fixed at this point.
+- **Phase 7 built:** `memory/conversation_buffer.py` (`ConversationBuffer`,
+  bounded history, single-session, in-memory), `--chat` interactive mode
+  in `main.py`. Key design decision: conversation context flows into
+  synthesis ONLY, never into domain_gate/router/retrieval — worked out
+  in advance (router's word-count heuristic would misroute nearly every
+  follow-up otherwise, and retrieval would degrade from stale keywords),
+  not discovered by a failed test.
 - **Process note:** the user's single commit contains all of D-027
   through D-036, message undersells its contents — not a bug, just a
   reminder to use the split-commit convention going forward.
-- **New verification method established:** cloning the actual GitHub
-  repo directly (network-permitted in this sandbox) is more reliable
-  than asking for local greps when stale-file confusion recurs.
-- **Regression status:** 116/116 across the entire test suite (8
-  files), zero regressions from any fix in this whole thread.
+- **Verification method established:** cloning the actual GitHub repo
+  directly (network-permitted in this sandbox) is more reliable than
+  asking for local greps when stale-file confusion recurs.
+- **Regression status:** 136/136 across the entire test suite (9
+  files), zero regressions from any fix/feature in this whole thread.
 - **Latency:** still an open, unresolved-cause variance question — see
   D-029. Not re-investigated this session.
-- **Next phase:** finish Phase 6 (`answerability.py`,
-  `self_consistency.py`) OR close the outstanding real-hardware
-  confirmations first. Should not
-  confirmed on real hardware — the
-  prior confirmation was of buggy behavior that happened to produce a
-  correct-looking result.
-- **Blockers:** real-machine verification of the fixed `run_agentic()`
-  retrieval) has not been run yet — only stub-based graph execution is
-  confirmed so far.
+- **Next phase:** Phase 8 (PyInstaller packaging) per `phases.md`, OR
+  finish Phase 6 (`answerability.py`, `self_consistency.py`) first —
+  both are legitimate next steps; real-hardware confirmation of Phase 7
+  (`--chat` mode) is the more immediate gap.
+- **Blockers:** Phase 7 has not been run on real hardware yet — only
+  sandbox-level logic/prompt-content verification is confirmed so far.
 
 ---
 
 ## Log (newest first)
+
+### Entry 024
+**Phase:** B-017 fixed; Phase 7 built (discovered largely already
+implemented from earlier work this session, verified and completed)
+**Action taken:** fixed B-017 (comma-in-bracket citations, recurred in
+real usage after being deliberately deferred) using the same mechanism
+as B-016. Moved to Phase 7 per user request — found `synthesis.py`,
+`graph.py`, and `main.py` already had the conversation-context threading
+wired in from earlier in this session; wrote the missing piece
+(`memory/conversation_buffer.py`) and verified the whole chain end to
+end, including confirming by direct code read that domain_gate/router/
+retrieval correctly still see only the raw query, never
+context-enriched text.
+**Decisions logged this run:** D-041 — full Phase 7 design rationale,
+specifically why conversation context is synthesis-only.
+**Debug entries logged this run:** B-017 closure marker added to the
+existing entry.
+**Regression status:** 136/136 across all 9 test files.
+**Next action for next session:** real-hardware confirmation of
+`--chat` mode is the most immediate open item — start a session, ask a
+question, then a follow-up that requires resolving a reference ("what
+about X instead", "tell me more about the second one") and confirm the
+answer actually uses the prior context correctly. Separately still
+open: Phase 6 completion (2 of 3 modules unbuilt), Phase 8 packaging,
+and the D-029 latency variance investigation whenever it next recurs.
+
+### Entry 023
+**Phase:** B-015 confirmed closed; B-016 found and fixed
+**Action taken:** re-ran the fusion-vs-fission query. Confirmed B-015
+genuinely fixed (no duplicate source_ids). Found a new bug by checking
+citation counts against the answer text, not just skimming for
+sensible-looking output: 3 cited sources collapsed to 1 in the
+verification count. Traced to adjacent citation tags having no text
+between them, which the old extraction logic treated as "nothing to
+attribute this citation to" and silently dropped. Fixed to reuse the
+last real claim text for adjacent tags instead.
+**Decisions logged this run:** D-039.
+**Debug entries logged this run:** B-015 closed, B-016 new.
+**Regression status:** 119/119, zero regressions.
+**Next action for next session:** commit this fix (split convention),
+then decide whether the still-open comma-in-bracket citation format
+gap is worth fixing too, or stays deferred. Also worth a full clean
+run without --debug at some point, to confirm the whole pipeline
+produces a good user-facing experience end to end, not just that each
+individual bug is fixed in isolation.
 
 ### Entry 022
 **Phase:** B-013/B-014 confirmed closed; B-015 found and fixed

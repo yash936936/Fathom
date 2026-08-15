@@ -383,5 +383,38 @@ retrieve stub that resets its ID counter per call, unlike the earlier
 test's stub which used a global counter and never actually exercised
 this bug). 116/116 full regression sweep.
 
+**Closure update:** confirmed on real hardware — zero duplicate
+source_ids in the re-run's Sources list. B-015 is closed.
+
+### B-016 — Back-to-back citation tags collapsed to just the first one
+**Phase:** 6, real-hardware run
+**Symptom:** model cited `[web:0][web:1][web:2]` (three tags) but
+`citations: 0 verified, 1 unverified, 0 unchecked` showed only 1 total.
+**Root cause:** `rag/synthesis.py`'s `_extract_citations()` required
+non-empty text between every pair of adjacent citation tags to attach a
+claim; back-to-back tags (multi-citing one claim, a normal pattern)
+have nothing between them, so every tag after the first in such a run
+was silently dropped.
+**Fix:** now tracks and reuses the last non-empty claim text for
+adjacent tags, only skipping when no claim text has appeared at all
+(the genuine edge case: a citation before any prose).
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`.
+**Verification:** tested directly against the real 3-tag answer text
+from the live run — 3/3 extracted where only 1 was before. 119/119
+full regression sweep.
+
+### B-017 — Comma-separated IDs in one citation bracket dropped entirely
+**Phase:** 6, clean real run
+**Symptom:** `[web:0, web:1]` in real output — recurrence of a
+previously-noted, deliberately-deferred gap.
+**Root cause:** `_CITATION_TAG_PATTERN`'s character class didn't allow
+comma or whitespace inside a bracket, so this pattern didn't match at
+all — worse than undercounting, it was a complete miss.
+**Fix:** extended the regex to allow comma/whitespace inside brackets,
+split on comma, reused B-016's claim-text-sharing logic per resulting ID.
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`.
+**Verification:** tested directly against the real 2-ID bracket text
+from this run. 121/121 full regression sweep.
+
 ---
 **Return to `/context.md` for next steps.**

@@ -1134,5 +1134,99 @@ counter and never actually exercised this bug, worth noting as a gap in
 my own prior test design, not just the code. 116/116 full regression
 sweep.
 
+### D-039 — B-015 confirmed fixed; found and fixed a common citation-undercounting bug (B-016)
+**Phase:** 6, seventh real verification round
+**B-015 confirmed:** the re-run's final Sources list had zero duplicate
+IDs anywhere. Closed for real this time.
+**New finding, from checking the citation math, not just reading the
+answer:** the model cited `[web:0][web:1][web:2]` — three tags — but
+`citations: 0 verified, 1 unverified, 0 unchecked` only accounted for
+ONE citation total. Traced directly: `_extract_citations()`'s claim-
+text-between-tags logic requires non-empty text between every pair of
+adjacent tags, and back-to-back tags (a common, normal pattern for
+multi-citing one claim) have nothing between them — `if not claim_text:
+continue` silently dropped every tag after the first in any such run.
+**Fix:** `_extract_citations()` now tracks the last non-empty claim
+text and reuses it for adjacent tags, instead of dropping them. Only
+skips a tag when NO claim text has ever appeared yet (a genuine edge
+case — an answer opening with a citation before any prose).
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`
+(3 new tests: the exact real 3-tag case, confirming shared claim text
+across adjacent tags, and confirming the genuine leading-citation edge
+case still correctly skips).
+**Verification:** tested directly against the real answer text from
+this run — 3/3 citations now extracted where only 1 was before, byte-
+identical to the live failure. 119/119 full regression sweep.
+**Note:** this is a more common, higher-impact pattern than the earlier
+comma-in-one-bracket gap (`[arxiv:2, arxiv:3]`) noted and deliberately
+deferred — that one remains open, unfixed, low-priority. This one was
+worth fixing immediately since multi-citing one claim with adjacent
+tags is normal model behavior, not a rare formatting quirk.
+
+### D-040 — Comma-in-bracket citation format recurred in real usage; fixed with the same B-016 mechanism
+**Phase:** 6, clean (non-debug) real run
+**Finding:** a clean `main.py` run (no `--debug`) showed
+`[web:0, web:1]` — the comma-separated-IDs-in-one-bracket pattern
+noted and deliberately deferred back in Entry 021. Recurring in real
+usage (not hypothetical) was the trigger to fix it now rather than
+keep deferring.
+**Fix:** extended `_CITATION_TAG_PATTERN` to allow comma/whitespace
+inside a bracket, then split each match's contents on comma into one
+citation per ID, reusing B-016's last-claim-text mechanism so all IDs
+from one bracket share the same claim attribution.
+**Also confirmed NOT a bug:** the same run showed `[news:15]` next to
+`[news:0]`/`[news:1]` in the Sources list, which looked suspicious at
+a glance. Traced through: this is B-015's renumbering working
+correctly — 3 retry attempts accumulated 15+ distinct news chunks,
+uniquely renumbered across the whole session, then curator/reranker
+filtered down to 3 survivors with non-contiguous but still unique
+indices. B-015 guarantees uniqueness, not contiguity — gaps are
+expected whenever most of a renumbered set gets filtered out.
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`.
+**Verification:** tested directly against the real answer text from
+this run — 2/2 citations now extracted where 0 were before (the old
+regex didn't match a comma-containing bracket at all). 121/121 full
+regression sweep.
+
+### D-041 — Phase 7: short-term conversation memory, context scoped to synthesis only
+**Phase:** 7
+**Decision:** built `memory/conversation_buffer.py`'s `ConversationBuffer`
+(bounded to `MAX_TURNS=6`, single-session, in-memory only — no
+persistence across process restarts, that's `architecture.md`'s
+`long_term_store.py` v2 extension point, not this) and a new `--chat`
+interactive mode in `main.py` (`run_chat_loop()`).
+**The one design choice that actually matters here:** conversation
+context is threaded into `rag/synthesis.py`'s `generate()` ONLY —
+never into the query used for `core/domain_gate.py`, `core/router.py`,
+or `rag/retriever_hybrid.py`'s `retrieve()`. Reasoning worked out before
+writing code, not discovered by a failed test: `router.py`'s complexity
+classifier uses a 25-word threshold — prepending prior Q&A to every
+follow-up would push nearly all of them over that line, misrouting
+simple follow-ups into the expensive agentic path every time. It would
+also pollute retrieval search terms with old-topic keywords, degrading
+result relevance for the actual current question. Keeping
+`domain_gate`/`router`/`retrieval` on the raw follow-up text and only
+enriching the final synthesis call (where the model actually needs to
+resolve references like "that" or "the second one") avoids both
+problems entirely.
+**Files touched:** `src/memory/conversation_buffer.py` (new),
+`src/rag/synthesis.py` (`generate()` gained `conversation_context`
+param), `src/rag/graph.py` (`build_graph()`/`run_agentic()` thread it
+through to the agentic path's synthesis node too, so both paths
+benefit), `src/main.py` (`run_query()` threads it through, new
+`--chat` flag + `run_chat_loop()`), `test_phase7_manual.py` (new).
+**Verification:** 136/136 full regression sweep across all 9 test
+files. New tests confirm: buffer add/format/trim/clear behavior, the
+`MAX_TURNS` bound is respected, long answers get truncated in the
+formatted context (not included in full), and — the test that actually
+matters most — `generate()`'s real prompt sent to the model contains
+the injected context when given, and contains no context block at all
+when `conversation_context=""`. Manually re-confirmed by reading
+`run_query()`'s full body that `state = new_state(query)` and every
+`check_domain`/`route`/`retrieve` call use the raw `query`, never an
+enriched one. NOT yet verified: an actual real-hardware `--chat`
+session — same pattern as every feature in this project, needs real
+confirmation before treating this as done.
+
 ---
 **Return to `/context.md` for next steps.**

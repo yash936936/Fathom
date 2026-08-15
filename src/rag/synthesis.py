@@ -36,7 +36,7 @@ explicitly rather than guessing.
 - Be concise. Do not pad the answer with unnecessary caveats or repetition.
 """
 
-_CITATION_TAG_PATTERN = re.compile(r"\[([a-zA-Z0-9_:.-]+)\]")
+_CITATION_TAG_PATTERN = re.compile(r"\[([a-zA-Z0-9_:.,\s-]+)\]")
 
 # Matches a sentence-ending punctuation mark followed by whitespace --
 # used to find the last COMPLETE sentence boundary in a possibly-
@@ -86,26 +86,49 @@ def _extract_citations(answer: str, valid_source_ids: set[str]) -> list[Citation
     the sentence-ish chunk of text preceding it, so citation_verifier.py
     (Phase 6) has (claim, source_id) pairs to check rather than having
     to re-parse the raw answer itself.
+
+    Per decisions.md D-039/D-040: two related real-run failures fixed
+    with the same underlying fix. B-016: the model citing multiple
+    sources for one claim back-to-back, e.g. "...global trends in
+    fusion [web:0][web:1][web:2], ...", left no text BETWEEN adjacent
+    tags, so the old logic's `if not claim_text: continue` silently
+    dropped every tag after the first in any such run. B-017: the model
+    also sometimes puts multiple IDs in ONE bracket,
+    e.g. "[web:0, web:1]" -- the old character class didn't allow comma/
+    whitespace inside a bracket at all, so these were dropped entirely,
+    not just undercounted. Both patterns are normal ways a model
+    multi-cites one claim, not edge cases; adjacent tags now reuse the
+    last non-empty claim text, and each bracket's contents are split on
+    comma into one citation per ID.
     """
     citations: list[Citation] = []
     last_end = 0
+    last_claim_text = ""
     for match in _CITATION_TAG_PATTERN.finditer(answer):
-        source_id = match.group(1)
+        raw_ids = match.group(1)
+        source_ids = [s.strip() for s in raw_ids.split(",") if s.strip()]
         claim_text = answer[last_end:match.start()].strip()
         last_end = match.end()
-        if not claim_text:
+        if claim_text:
+            last_claim_text = claim_text
+        elif not last_claim_text:
+            # No claim text has ever appeared before this tag (e.g. the
+            # answer opens with a citation before any prose) -- nothing
+            # sensible to attribute it to, so skip only in this genuine
+            # edge case, not the common back-to-back-citations case.
             continue
-        citations.append(
-            Citation(
-                claim=claim_text,
-                source_id=source_id,
-                verified=None if source_id in valid_source_ids else False,
-                # verified=False immediately (not just None) when the
-                # model cited a source_id that isn't in the real set --
-                # that's a structural failure Phase 6 doesn't need an
-                # LLM call to catch, it's already known at parse time.
+        for source_id in source_ids:
+            citations.append(
+                Citation(
+                    claim=last_claim_text,
+                    source_id=source_id,
+                    verified=None if source_id in valid_source_ids else False,
+                    # verified=False immediately (not just None) when the
+                    # model cited a source_id that isn't in the real set --
+                    # that's a structural failure Phase 6 doesn't need an
+                    # LLM call to catch, it's already known at parse time.
+                )
             )
-        )
     return citations
 
 
@@ -115,6 +138,7 @@ def generate(
     model: FathomModel,
     max_tokens: int = 512,
     on_token=None,
+    conversation_context: str = "",
 ) -> tuple[str, list[Citation]]:
     """Core synthesis call, shared by the fast path (Phase 4) and the
     agentic path's SYNTHESIS node (Phase 5). Returns (answer_text,
@@ -125,6 +149,14 @@ def generate(
     streaming output -- see decisions.md D-021. Citation extraction still
     runs on the complete answer after streaming finishes, since citation
     tags need to be matched against the full text, not token-by-token.
+
+    `conversation_context`, if given (Phase 7, D-041), is prior Q&A
+    history formatted by memory/conversation_buffer.py -- used ONLY here,
+    at synthesis, so the model can resolve references like "that" or
+    "the second one." Deliberately NOT threaded into domain_gate,
+    router, or retrieval -- see D-041 for why injecting it earlier would
+    break the router's word-count heuristic and pollute retrieval
+    keyword-matching with old-topic terms.
     """
     if not chunks:
         # No retrieved evidence at all -- do not let the model answer
@@ -140,11 +172,16 @@ def generate(
         )
 
     sources_block = _format_sources(chunks)
+    context_block = f"Conversation so far:\n{conversation_context}\n\n" if conversation_context else ""
     user_prompt = (
+        f"{context_block}"
         f"Sources:\n\n{sources_block}\n\n"
         f"Question: {query}\n\n"
         "Answer using only the sources above, with [source_id] citations "
-        "on every claim."
+        "on every claim. If the conversation history above is relevant "
+        "to resolving what this question refers to, use it -- but "
+        "ground the answer itself only in the sources, never in prior "
+        "answers alone."
     )
 
     answer = model.chat(

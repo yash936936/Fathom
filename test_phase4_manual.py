@@ -59,6 +59,52 @@ answer_none = "This has no citations at all."
 citations_none = _extract_citations(answer_none, valid_ids)
 check("no citation tags -> empty citations list", citations_none == [])
 
+# --- B-016 regression: back-to-back citation tags for one claim must
+# all be extracted, not silently dropped after the first. Real bug
+# caught on a live run: "...global trends in fusion [web:0][web:1]
+# [web:2], there is no information..." collapsed 3 citations to 1
+# because the OLD logic required non-empty text between every pair of
+# tags, and adjacent tags have nothing between them.
+answer_adjacent = "Some claim supported by multiple sources [web:0][web:1][web:2]."
+citations_adjacent = _extract_citations(answer_adjacent, valid_ids)
+check(
+    "B-016: three back-to-back citation tags all get extracted, not just the first",
+    len(citations_adjacent) == 3
+    and {c["source_id"] for c in citations_adjacent} == {"web:0", "web:1", "web:2"},
+)
+check(
+    "B-016: adjacent tags share the same preceding claim text",
+    len({c["claim"] for c in citations_adjacent}) == 1
+    and citations_adjacent[0]["claim"] == "Some claim supported by multiple sources",
+)
+
+# --- B-017 regression: comma-separated IDs inside ONE bracket, e.g.
+# "[web:0, web:1]", recurred in real usage after B-016 was fixed --
+# the old character class didn't allow comma/whitespace inside a
+# bracket at all, so these were dropped entirely (not just
+# undercounted, since the bracket didn't match the pattern at all).
+answer_comma_bracket = "Milestones are mentioned [web:0, web:1], but nothing else."
+citations_comma = _extract_citations(answer_comma_bracket, valid_ids)
+check(
+    "B-017: comma-separated IDs in one bracket both get extracted",
+    len(citations_comma) == 2
+    and {c["source_id"] for c in citations_comma} == {"web:0", "web:1"},
+)
+check(
+    "B-017: comma-separated IDs share the same claim text",
+    len({c["claim"] for c in citations_comma}) == 1,
+)
+
+# an answer that opens with a citation before any prose has nothing to
+# attribute it to -- should still be skipped, this is the genuine
+# no-claim-text edge case, not the common adjacent-tags case.
+answer_leading_citation = "[web:0] Then some real claim text follows."
+citations_leading = _extract_citations(answer_leading_citation, valid_ids)
+check(
+    "leading citation with no preceding text is still correctly skipped",
+    len(citations_leading) == 0 or citations_leading[0]["claim"] != "",
+)
+
 # --- synthesis.generate with zero chunks -> explicit refusal, no model call ---
 class _ShouldNotBeCalled:
     def chat(self, *a, **kw):
