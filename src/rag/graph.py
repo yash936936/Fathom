@@ -37,6 +37,7 @@ def build_graph(
     top_k: int = 8,
     report: Callable[[str], None] | None = None,
     debug_report: Callable[[str], None] | None = None,
+    conversation_context: str = "",
 ):
     """Returns a compiled LangGraph graph. `model` is closed over by the
     node functions below rather than threaded through ResearchState,
@@ -130,7 +131,9 @@ def build_graph(
     def synthesis_node(state: ResearchState) -> ResearchState:
         report("Generating final answer")
         chunks = state.get("retrieved_chunks", [])
-        answer, citations = generate(state["original_query"], chunks, model)
+        answer, citations = generate(
+            state["original_query"], chunks, model, conversation_context=conversation_context
+        )
 
         gap = state.get("sufficiency_gap")
         if gap and not state.get("sufficiency", True):
@@ -205,6 +208,7 @@ def run_agentic(
     top_k: int = 8,
     report: Callable[[str], None] | None = None,
     debug_report: Callable[[str], None] | None = None,
+    conversation_context: str = "",
 ) -> ResearchState:
     """Entry point for main.py -- builds and runs the graph for one
     query. Building the graph per-call (not cached) is cheap; it's
@@ -213,7 +217,9 @@ def run_agentic(
     """
     from core.state import new_state
 
-    compiled = build_graph(model, top_k=top_k, report=report, debug_report=debug_report)
+    compiled = build_graph(
+        model, top_k=top_k, report=report, debug_report=debug_report, conversation_context=conversation_context
+    )
     initial_state = new_state(query)
     initial_state["path"] = "agentic"
     final_state = compiled.invoke(initial_state)

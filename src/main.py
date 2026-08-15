@@ -95,6 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
         "as plain lines to stderr, independent of --verbose's footer. "
         "For developers diagnosing retrieval/verification behavior.",
     )
+    parser.add_argument(
+        "--chat",
+        action="store_true",
+        help="Start an interactive multi-turn session (Phase 7). "
+        "Follow-up questions can reference prior answers in the same "
+        "session. Type 'exit' or 'quit' to leave, or Ctrl+C/Ctrl+D.",
+    )
     return parser
 
 
@@ -108,6 +115,7 @@ def run_query(
     report: Callable[[str], None],
     stream_tokens: bool,
     debug_report: Callable[[str], None] | None = None,
+    conversation_context: str = "",
 ) -> tuple[str, str, list[str], bool]:
     """Returns (answer_text, sources_block, flags, already_streamed).
 
@@ -122,6 +130,11 @@ def run_query(
     verification counts) independent of the spinner UI -- see
     decisions.md D-033, added after D-030's simplified --verbose
     accidentally removed visibility needed to diagnose B-007.
+
+    `conversation_context`, if given (Phase 7, D-041), is prior Q&A
+    history from --chat mode's ConversationBuffer. Threaded ONLY into
+    synthesis (both paths) -- domain_gate, router, and retrieval all
+    still see just `query` on its own, unchanged. See D-041 for why.
     """
     state = new_state(query)
 
@@ -163,7 +176,10 @@ def run_query(
         report("Planning multi-step research")
         from rag.graph import run_agentic
 
-        final_state = run_agentic(query, model, top_k=top_k, report=report, debug_report=debug_report)
+        final_state = run_agentic(
+            query, model, top_k=top_k, report=report, debug_report=debug_report,
+            conversation_context=conversation_context,
+        )
         answer = final_state.get("answer", "")
         chunks = final_state.get("retrieved_chunks", [])
     else:
@@ -181,7 +197,10 @@ def run_query(
 
             already_streamed = True
 
-        answer, _citations = generate(query, chunks, model, max_tokens=max_tokens, on_token=on_token)
+        answer, _citations = generate(
+            query, chunks, model, max_tokens=max_tokens, on_token=on_token,
+            conversation_context=conversation_context,
+        )
         if stream_tokens:
             print("\n", file=sys.stderr)
 
@@ -208,11 +227,59 @@ def run_query(
     return (answer, sources_block, flags, already_streamed)
 
 
+def run_chat_loop(model, mode: str, max_tokens: int, top_k: int) -> int:
+    """Interactive multi-turn session (Phase 7, D-041). Each turn runs
+    through the same run_query() pipeline as a single-shot invocation --
+    domain_gate/router/retrieval all see the raw follow-up question,
+    unchanged; only synthesis additionally sees the conversation history
+    via `conversation_context`. Uses the same clean spinner UI as
+    default quiet mode for each turn.
+    """
+    from memory.conversation_buffer import ConversationBuffer
+
+    buffer = ConversationBuffer()
+    print("Fathom chat mode -- type 'exit' or 'quit' to leave (Ctrl+C/Ctrl+D also work).\n")
+
+    while True:
+        try:
+            query = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not query:
+            continue
+        if query.lower() in ("exit", "quit"):
+            break
+
+        context = buffer.format_context()
+        with Spinner() as spinner:
+            report = make_stage_reporter(verbose=False, spinner=spinner)
+            answer, sources_block, _flags, _streamed = run_query(
+                query,
+                model,
+                mode=mode,
+                max_tokens=max_tokens,
+                top_k=top_k,
+                report=report,
+                stream_tokens=False,
+                conversation_context=context,
+            )
+        print(answer)
+        if sources_block:
+            print(sources_block)
+        print()
+
+        buffer.add_turn(query, answer)
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    if not args.query:
-        print('Fathom\nUsage: fathom "your research question" [--mode quick|deep] [--verbose]', file=sys.stderr)
+    if not args.chat and not args.query:
+        print('Fathom\nUsage: fathom "your research question" [--mode quick|deep] [--verbose] [--chat]', file=sys.stderr)
         return 1
 
     max_tokens = args.max_tokens
@@ -224,6 +291,9 @@ def main(argv: list[str] | None = None) -> int:
     except (ModelNotFoundError, RuntimeError) as exc:
         print(f"Fathom: {exc}", file=sys.stderr)
         return 2
+
+    if args.chat:
+        return run_chat_loop(model, args.mode, max_tokens, args.top_k)
 
     start = time.monotonic()
 
