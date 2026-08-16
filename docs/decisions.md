@@ -1228,5 +1228,73 @@ enriched one. NOT yet verified: an actual real-hardware `--chat`
 session — same pattern as every feature in this project, needs real
 confirmation before treating this as done.
 
+### D-042 — Phase 7 confirmed working on real hardware, first try, no bugs
+**Phase:** 7, real verification
+**Finding:** first `--chat` session confirmed the exact scenario Phase
+7 was built for. Turn 1: "What is fusion energy?" — clean, grounded
+answer, valid citations. Turn 2: "How does that compare to fission?" —
+retrieval correctly used the raw follow-up (no context pollution,
+"fission"/"compare" alone were enough keywords to pull genuinely
+on-topic sources like NRC's and DOE's fission-vs-fusion pages), and
+synthesis correctly resolved "that" to mean fusion energy using the
+injected conversation context, producing a coherent comparison rather
+than answering as if "that" were undefined. Both turns' citations
+resolved to real, listed sources with no duplicates and no dropped
+citations.
+**Why this validates D-041's design call specifically:** the
+raw-query-for-retrieval decision wasn't just theoretically sound, it
+worked in practice on the first real test — retrieval didn't need
+context injection to find the right sources for a pronoun-laden
+follow-up, because the follow-up's own real keywords were sufficient.
+**No bugs found, no fixes needed.** Noted here as a clean success,
+not left unrecorded just because nothing broke — a real confirmation is
+still worth logging with the same rigor as a bug.
+
+### D-043 — Phase 8: PyInstaller packaging built, mechanics verified in sandbox, real main.py build still needed
+**Phase:** 8
+**Decision:** built `build/_common.py` (shared invocation logic —
+avoids triplicating the same PyInstaller command across three
+per-OS scripts), `build/build_windows.py`, `build/build_macos.py`,
+`build/build_linux.py` (each a thin OS-specific entry point calling
+the shared function), `build/hooks/hook-llama_cpp.py` (the required
+hook flagged as a known landmine back when packaging was first scoped
+— llama-cpp-python's compiled shared library isn't visible to
+PyInstaller's default import scanner without it), and
+`build/requirements-build.txt` (PyInstaller kept separate from the
+main runtime `requirements.txt`, since packaging tooling isn't needed
+to just run Fathom).
+**`--onedir`, not `--onefile`:** a `--onefile` build re-extracts itself
+into a temp directory on every single launch, adding real latency to
+every invocation, not just the first. `--onedir` pays that cost once,
+at install/unzip time. Worth doing even though this app's own per-query
+latency (D-022) already dwarfs a few seconds of unpack time — no reason
+to add avoidable overhead on top of an already-accepted one.
+**What was actually verified in this sandbox, and how:** installed
+PyInstaller directly (fast — unlike `llama-cpp-python`, no slow native
+build) and ran the real invocation mechanics from `_common.py` against
+a minimal stand-in script (not the real `main.py`, which needs
+`llama-cpp-python` — untestable here per the standing sandbox
+limitation, same as every other llama-cpp-python interaction in this
+project). Confirmed: the build completes successfully, produces a
+working standalone executable that runs independent of the Python
+interpreter/venv, and — importantly — passing `--additional-hooks-dir`
+at our real `build/hooks/` directory causes no error even when the
+hooked module isn't imported by the built script, confirming the hook
+mechanism itself won't break the real build.
+**What remains genuinely unverified, stated plainly:** the actual real
+`main.py` build (needs `llama-cpp-python`, can't be built in this
+sandbox), whether the hook correctly bundles the compiled library when
+it's actually needed, and all cross-platform builds (this sandbox is
+Linux-only — Windows/macOS builds need to run on those OSes per D-005,
+can't be tested here at all).
+**Files touched:** `build/_common.py`, `build/build_windows.py`,
+`build/build_macos.py`, `build/build_linux.py`,
+`build/hooks/hook-llama_cpp.py`, `build/requirements-build.txt`.
+**Verification:** real PyInstaller build + real executable run,
+confirmed in this sandbox with a stand-in script (see above for exact
+scope). Real `main.py` build on real hardware is the next, necessary
+step — same "sandbox confirms what it can, real hardware confirms the
+rest" pattern as everything else in this project.
+
 ---
 **Return to `/context.md` for next steps.**

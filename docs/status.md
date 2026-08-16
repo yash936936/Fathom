@@ -7,41 +7,82 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 7 — Short-term memory (built, code-complete,
-  not yet real-hardware verified)
+- **Active phase:** Phase 8 — Packaging (PyInstaller) — code-complete,
+  mechanics verified in sandbox, real `main.py` build still needed.
+- **Phase 7:** CONFIRMED WORKING ON REAL HARDWARE (Entry 025) — first
+  try, no bugs.
 - **Phase 6 status:** still not complete — `citation_verifier.py` is
   built and confirmed working; `answerability.py` and
-  `self_consistency.py` remain unbuilt. Not blocking Phase 7 work.
-- **B-016/B-017 both fixed** (comma-in-bracket citation format, recurred
-  in real usage, fixed with the same claim-sharing mechanism as B-016).
-  All of B-011 through B-017 confirmed/fixed at this point.
-- **Phase 7 built:** `memory/conversation_buffer.py` (`ConversationBuffer`,
-  bounded history, single-session, in-memory), `--chat` interactive mode
-  in `main.py`. Key design decision: conversation context flows into
-  synthesis ONLY, never into domain_gate/router/retrieval — worked out
-  in advance (router's word-count heuristic would misroute nearly every
-  follow-up otherwise, and retrieval would degrade from stale keywords),
-  not discovered by a failed test.
-- **Process note:** the user's single commit contains all of D-027
-  through D-036, message undersells its contents — not a bug, just a
-  reminder to use the split-commit convention going forward.
-- **Verification method established:** cloning the actual GitHub repo
-  directly (network-permitted in this sandbox) is more reliable than
-  asking for local greps when stale-file confusion recurs.
+  `self_consistency.py` remain unbuilt. Not blocking Phase 8.
+- **Phase 8 built:** `build/_common.py` (shared PyInstaller invocation
+  logic), `build/build_windows.py`/`build_macos.py`/`build_linux.py`
+  (thin per-OS entry points), `build/hooks/hook-llama_cpp.py` (the
+  compiled-library hook flagged as a landmine back when packaging was
+  first scoped), `build/requirements-build.txt` (PyInstaller kept
+  separate from runtime deps). `--onedir` chosen over `--onefile` —
+  see D-043 for why.
+- **What's actually verified vs. not, stated precisely:** installed
+  PyInstaller in sandbox (fast, unlike llama-cpp-python) and ran a real
+  build + real executable against a stand-in script — confirmed the
+  build succeeds, the executable runs standalone, and the hook
+  directory causes no error even when unused. NOT verified: the real
+  `main.py` build (needs llama-cpp-python, can't build in this
+  sandbox), whether the hook actually bundles the compiled library when
+  genuinely needed, and any cross-platform build (sandbox is Linux-only;
+  Windows/macOS builds must run on those OSes per D-005).
+- **B-011 through B-017 all confirmed/fixed** — no open bugs at this
+  point in the project.
 - **Regression status:** 136/136 across the entire test suite (9
   files), zero regressions from any fix/feature in this whole thread.
 - **Latency:** still an open, unresolved-cause variance question — see
   D-029. Not re-investigated this session.
-- **Next phase:** Phase 8 (PyInstaller packaging) per `phases.md`, OR
-  finish Phase 6 (`answerability.py`, `self_consistency.py`) first —
-  both are legitimate next steps; real-hardware confirmation of Phase 7
-  (`--chat` mode) is the more immediate gap.
-- **Blockers:** Phase 7 has not been run on real hardware yet — only
-  sandbox-level logic/prompt-content verification is confirmed so far.
+- **Next phase:** finish Phase 8 (real `main.py` build on real
+  hardware, per-OS), OR finish Phase 6 (`answerability.py`,
+  `self_consistency.py`) — both legitimate next steps.
+- **Blockers:** Phase 8 needs a real `main.py` build with
+  llama-cpp-python actually installed, on each target OS — none of
+  that is possible in this sandbox.
 
 ---
 
 ## Log (newest first)
+
+### Entry 026
+**Phase:** 8
+**Action taken:** built `build/_common.py`, the three per-OS
+`build_<os>.py` scripts, `build/hooks/hook-llama_cpp.py`, and
+`build/requirements-build.txt`. Verified what's actually verifiable in
+this sandbox: installed PyInstaller (fast), ran a real build against a
+stand-in script, confirmed the resulting executable runs standalone,
+and confirmed the hook directory doesn't break anything when passed
+even without the hooked module being used.
+**Decisions logged this run:** D-043 — `--onedir` rationale, exact
+scope of what was/wasn't verified.
+**Debug entries logged this run:** none — clean build, no bugs found
+in the mechanics that were testable.
+**Phase 8 exit criteria met?** Partially. Build scripts work
+mechanically. NOT met: an actual `main.py` build (needs
+llama-cpp-python, untestable here), and no cross-platform testing at
+all (sandbox is Linux-only).
+**Next action for next session:** on real hardware, per OS: `pip
+install -r requirements.txt -r build/requirements-build.txt`, then
+`python build/build_<os>.py`, then actually run the resulting
+executable with a real query and confirm it works exactly like running
+`py src/main.py` from source does. This needs to happen on Windows,
+macOS, AND Linux separately per D-005 — start with whichever OS the
+user has available first.
+
+### Entry 025
+**Phase:** 7 real confirmation; Phase 8 starting
+**Action taken:** user ran a real `--chat` session. Worked correctly on
+the first try — "that" resolved correctly across turns, retrieval used
+only the raw follow-up (no context pollution), all citations resolved
+to real sources. Logged as a clean confirmation (D-042), not left
+unrecorded just because nothing broke.
+**Decisions logged this run:** D-042.
+**Debug entries logged this run:** none — no bugs found.
+**Next action for next session:** begin Phase 8 (PyInstaller packaging)
+per `phases.md` — this entry continues into that work.
 
 ### Entry 024
 **Phase:** B-017 fixed; Phase 7 built (discovered largely already
