@@ -1,0 +1,5 @@
+# Build-time only -- NOT needed to run Fathom, only to package it into
+# a standalone executable via build_<os>.py. Kept separate from the
+# main requirements.txt so a normal dev/runtime install doesn't pull in
+# packaging tooling nobody but a release build needs.
+pyinstaller>=6.0

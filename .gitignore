@@ -14,6 +14,8 @@ ENV/
 *.egg-info/
 dist/
 build/dist/
+build/_work_*/
+build/_spec_*/
 build/*.spec
 
 # --- Model weights (per decisions.md D-008 -- never committed, always
