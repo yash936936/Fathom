@@ -7,8 +7,15 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 8 — Packaging (PyInstaller) — code-complete,
-  mechanics verified in sandbox, real `main.py` build still needed.
+- **Active phase:** Phase 8 — Packaging (PyInstaller) — **Windows
+  CONFIRMED WORKING END-TO-END on real hardware.** Real `main.py`
+  build succeeded, hook fired correctly (confirmed in build log), and
+  the standalone `.exe` ran outside any Python venv, loaded the real
+  model, retrieved real sources, produced a correctly grounded and
+  cited answer. This is the real thing, not just a successful build log.
+- **macOS and Linux builds: still untested.** Per D-005, PyInstaller
+  can't cross-compile — each needs building and running on that actual
+  OS. Not assumed to work just because Windows did.
 - **Phase 7:** CONFIRMED WORKING ON REAL HARDWARE (Entry 025) — first
   try, no bugs.
 - **Phase 6 status:** still not complete — `citation_verifier.py` is
@@ -18,34 +25,41 @@
   logic), `build/build_windows.py`/`build_macos.py`/`build_linux.py`
   (thin per-OS entry points), `build/hooks/hook-llama_cpp.py` (the
   compiled-library hook flagged as a landmine back when packaging was
-  first scoped), `build/requirements-build.txt` (PyInstaller kept
-  separate from runtime deps). `--onedir` chosen over `--onefile` —
-  see D-043 for why.
-- **What's actually verified vs. not, stated precisely:** installed
-  PyInstaller in sandbox (fast, unlike llama-cpp-python) and ran a real
-  build + real executable against a stand-in script — confirmed the
-  build succeeds, the executable runs standalone, and the hook
-  directory causes no error even when unused. NOT verified: the real
-  `main.py` build (needs llama-cpp-python, can't build in this
-  sandbox), whether the hook actually bundles the compiled library when
-  genuinely needed, and any cross-platform build (sandbox is Linux-only;
-  Windows/macOS builds must run on those OSes per D-005).
+  first scoped — now confirmed working on real hardware, not just in
+  sandbox mechanics testing), `build/requirements-build.txt`.
+  `--onedir` chosen over `--onefile` — see D-043 for why.
 - **B-011 through B-017 all confirmed/fixed** — no open bugs at this
   point in the project.
 - **Regression status:** 136/136 across the entire test suite (9
   files), zero regressions from any fix/feature in this whole thread.
 - **Latency:** still an open, unresolved-cause variance question — see
   D-029. Not re-investigated this session.
-- **Next phase:** finish Phase 8 (real `main.py` build on real
-  hardware, per-OS), OR finish Phase 6 (`answerability.py`,
+- **Next phase:** macOS and Linux builds for Phase 8 (each needs
+  running on that actual OS), OR finish Phase 6 (`answerability.py`,
   `self_consistency.py`) — both legitimate next steps.
-- **Blockers:** Phase 8 needs a real `main.py` build with
-  llama-cpp-python actually installed, on each target OS — none of
-  that is possible in this sandbox.
+- **Blockers:** none for Windows (done). macOS/Linux builds need those
+  actual OSes — not possible in this sandbox or from Windows.
 
 ---
 
 ## Log (newest first)
+
+### Entry 027
+**Phase:** 8, real confirmation (Windows)
+**Action taken:** user built the real `main.py` on Windows, confirmed
+`hook-llama_cpp.py` fired in the build log, then actually ran the
+standalone `.exe` outside any Python venv with a real query — loaded
+the model, retrieved real sources, produced a correctly grounded and
+cited answer. This is genuine end-to-end confirmation, not just a
+successful build.
+**Decisions logged this run:** D-044.
+**Debug entries logged this run:** none — clean success, no bugs.
+**Phase 8 exit criteria met?** For Windows: yes. macOS and Linux remain
+untested — each needs building and running on that actual OS per D-005.
+**Next action for next session:** macOS and Linux builds, whenever
+those OSes are available. Separately: Phase 6 completion
+(`answerability.py`, `self_consistency.py`) remains open and
+independent of Phase 8's progress.
 
 ### Entry 026
 **Phase:** 8

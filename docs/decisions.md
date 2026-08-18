@@ -1296,5 +1296,30 @@ scope). Real `main.py` build on real hardware is the next, necessary
 step — same "sandbox confirms what it can, real hardware confirms the
 rest" pattern as everything else in this project.
 
+### D-044 — Phase 8 (Windows) CONFIRMED WORKING END-TO-END on real hardware
+**Phase:** 8, real verification
+**Finding:** built `fathom.exe` from the real `main.py` (not a
+stand-in) on real Windows hardware. Build log confirmed
+`hook-llama_cpp.py` fired correctly and `llama_cpp\lib` was picked up
+in the DLL search path — the exact mechanism D-043 flagged as needing
+real-hardware confirmation. Then the `.exe` was actually run, standalone,
+from a plain terminal with no Python venv active — loaded the real
+model, retrieved real live sources, produced a correctly grounded
+answer with every citation resolving to a real listed source. This is
+the genuine end-to-end confirmation Phase 8 needed, not just a
+successful build log.
+**Windows target: DONE.** macOS and Linux builds remain untested — per
+D-005, PyInstaller can't cross-compile, so each needs to be built and
+run on that actual OS separately. Not assumed to work just because
+Windows did.
+**Minor, non-actionable observation:** the answer had two missing-space
+typos ("theextreme," "bythe"). Confirmed this is a model generation
+quirk, not a packaging or citation-pipeline bug — nothing in Fathom's
+own code touches whitespace in the raw generated text. Not fixing;
+noted so it isn't mistaken for a regression later.
+**Files touched:** none — this is a verification-only entry.
+**Verification:** real build + real standalone execution + real
+grounded, correctly-cited answer, all on real Windows hardware.
+
 ---
 **Return to `/context.md` for next steps.**
