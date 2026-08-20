@@ -416,5 +416,31 @@ split on comma, reused B-016's claim-text-sharing logic per resulting ID.
 **Verification:** tested directly against the real 2-ID bracket text
 from this run. 121/121 full regression sweep.
 
+### B-018 — `self_consistency._NUMBER_PATTERN` never matched any number ending in `%`
+**Phase:** 6, caught during this session's own test-writing (not a
+real-hardware run -- logged per the same "found and fixed" rule
+regardless of where it surfaced, per `workflow.md` §2)
+**Symptom:** `test_phase6_self_consistency.py`'s fact-extraction test
+for a percentage value failed: `_extract_facts("...raising 50% more
+funding...")` did not include `"50%"` in the returned set.
+**Root cause:** the pattern was `\b\d[\d,.]*%?\b`. `\b` only matches at
+a transition between a `\w` and non-`\w` character. `%` is itself
+non-`\w`, so in `"50% "` (digit -> `%` -> space), there is no such
+transition immediately after the `%` -- both neighboring characters
+(`%` and the space) are non-word. The trailing `\b` therefore silently
+failed to match any number with a percent sign at all, while the
+leading `\b` was never the problem (a digit is always `\w`, so it
+correctly anchors after whitespace/punctuation).
+**Fix:** dropped the trailing `\b` entirely -- `\b\d[\d,.]*%?` -- since
+the leading boundary alone is sufficient to anchor the match correctly;
+no boundary check is needed at the end for this pattern to behave
+correctly.
+**Files touched:** `src/verification/self_consistency.py`,
+`test_phase6_self_consistency.py`.
+**Verification:** re-ran the test -- percentage extraction now passes
+(15/15). Confirmed via direct regex testing that plain integers, years,
+and comma/decimal-containing numbers (e.g. "1,200" or "3.5") still match
+correctly, not just the percentage case that surfaced the bug.
+
 ---
 **Return to `/context.md` for next steps.**

@@ -47,6 +47,7 @@ from core.ui import Spinner, make_stage_reporter
 from rag.reranker import rerank
 from rag.retriever_hybrid import retrieve
 from rag.synthesis import generate
+from verification.answerability import check_answerability, refusal_message
 
 QUICK_MODE_MAX_TOKENS = 120  # tight cap -- see module docstring on why
 DEEP_MODE_MAX_TOKENS = 512
@@ -176,6 +177,9 @@ def run_query(
         report("Planning multi-step research")
         from rag.graph import run_agentic
 
+        # enable_self_consistency left at its default (False, per
+        # D-045 §2 update) -- unresolved real-hardware cost, not yet
+        # worth paying on every agentic query by default.
         final_state = run_agentic(
             query, model, top_k=top_k, report=report, debug_report=debug_report,
             conversation_context=conversation_context,
@@ -186,6 +190,38 @@ def run_query(
         report("Searching sources")
         retrieved = retrieve(query, debug_report=debug_report)
         chunks = rerank(retrieved, top_k=top_k, requires_recency=state.get("requires_recency", False))
+
+        # Per code_logic.md §3 step 3 (Phase 6, D-045): a cheap
+        # false-premise check before spending a synthesis call. Skipped
+        # in quick mode -- quick mode's entire purpose (D-027) is
+        # minimizing LLM calls, and this is exactly one more call that
+        # mode is built to avoid; deep mode pays it since accuracy, not
+        # latency, is deep mode's stated priority.
+        if mode != "quick":
+            report("Checking whether the question is answerable")
+            a_verdict = check_answerability(query, model, chunks=chunks)
+            if debug_report:
+                debug_report(
+                    f"answerability: answerable={a_verdict.answerable} "
+                    f"ambiguous={a_verdict.ambiguous} reason={a_verdict.reason!r}"
+                )
+            if a_verdict.ambiguous:
+                state.setdefault("guardrail_flags", []).append("answerability_ambiguous")
+            elif not a_verdict.answerable:
+                # Early return, same pattern as the domain-refusal branch
+                # above: bypasses output_rail entirely rather than
+                # risking its require_citations check rejecting a
+                # citation-free refusal message and replacing it with
+                # the generic failure text.
+                state.setdefault("guardrail_flags", []).append(
+                    f"answerability_failed:{a_verdict.reason}"
+                )
+                return (
+                    refusal_message(a_verdict.reason),
+                    "",
+                    state.get("guardrail_flags", []),
+                    False,
+                )
 
         report(f"Generating answer from {len(chunks)} sources")
         on_token = None

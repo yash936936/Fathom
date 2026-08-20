@@ -7,42 +7,132 @@
 ---
 
 ## Current state
-- **Active phase:** Phase 8 — Packaging (PyInstaller) — **Windows
-  CONFIRMED WORKING END-TO-END on real hardware.** Real `main.py`
-  build succeeded, hook fired correctly (confirmed in build log), and
-  the standalone `.exe` ran outside any Python venv, loaded the real
-  model, retrieved real sources, produced a correctly grounded and
-  cited answer. This is the real thing, not just a successful build log.
-- **macOS and Linux builds: still untested.** Per D-005, PyInstaller
-  can't cross-compile — each needs building and running on that actual
-  OS. Not assumed to work just because Windows did.
-- **Phase 7:** CONFIRMED WORKING ON REAL HARDWARE (Entry 025) — first
-  try, no bugs.
-- **Phase 6 status:** still not complete — `citation_verifier.py` is
-  built and confirmed working; `answerability.py` and
-  `self_consistency.py` remain unbuilt. Not blocking Phase 8.
-- **Phase 8 built:** `build/_common.py` (shared PyInstaller invocation
-  logic), `build/build_windows.py`/`build_macos.py`/`build_linux.py`
-  (thin per-OS entry points), `build/hooks/hook-llama_cpp.py` (the
-  compiled-library hook flagged as a landmine back when packaging was
-  first scoped — now confirmed working on real hardware, not just in
-  sandbox mechanics testing), `build/requirements-build.txt`.
-  `--onedir` chosen over `--onefile` — see D-043 for why.
-- **B-011 through B-017 all confirmed/fixed** — no open bugs at this
-  point in the project.
-- **Regression status:** 136/136 across the entire test suite (9
-  files), zero regressions from any fix/feature in this whole thread.
+- **Active phase:** Phase 6 — now CODE-COMPLETE. All three planned
+  modules exist and are wired: `citation_verifier.py` (previously
+  confirmed working), and this session's new
+  `verification/answerability.py` and `verification/self_consistency.py`.
+  Wired into both the fast path (`main.py`) and agentic path
+  (`rag/graph.py`, new `answerability_pre` node + expanded
+  `verification` node). See D-045 for full design writeup, including an
+  explicit, unresolved cost tradeoff on `self_consistency.py` (adds a
+  full extra synthesis call to every agentic query — see below).
+- **Phase 6 exit criteria:** code-complete, but NOT fully met — the
+  per-claim citation accuracy metric (`trd.md` §7) still needs real
+  eval-set tracking, and none of this session's work has been confirmed
+  on real hardware yet (stub-model tests only, same standing sandbox
+  limitation as every phase).
+- **Windows packaging (Phase 8): still done, unchanged** — real build,
+  real hook firing, real standalone execution, real grounded answer
+  (D-044). Not touched this session.
+- **macOS and Linux (Phase 8): still open** — per D-005, each needs its
+  own OS to build on. Not touched this session; still the other
+  legitimate next step alongside Phase 6 real-hardware confirmation.
+- **Open cost question — RESOLVED this follow-up (D-046):**
+  `enable_self_consistency` now defaults to **False** in both
+  `build_graph()` and `run_agentic()`. D-045 had left it defaulting to
+  `True` while separately flagging the cost as unresolved — that
+  wasn't actually a resolution, it just shipped the more expensive
+  behavior by default while saying so. Now off until real-hardware
+  timing data justifies turning it on.
+- **Doc-consistency note — FIXED this follow-up (D-046):**
+  `code_logic.md` §3 step 5's citation-check mislabel (flagged, not
+  fixed, in D-045) is now corrected — attributes the fast-path
+  structural check to `guardrail.output_rail`, not
+  `citation_verifier.py`. §7 updated to state the actual sampling
+  temperature (0.7) and the new default.
+- **Sandbox observation, not a Fathom bug (not logged in debug.md, same
+  reasoning as Entry 005's curl/bash-profile note):** this sandbox was
+  initially missing `rank_bm25` as an installed dependency. That alone
+  wouldn't have been notable, except `unittest.mock.patch("rag.graph.
+  retrieve", ...)` silently swallowed the resulting `ModuleNotFoundError`
+  and re-raised it as a misleading `AttributeError: module 'rag' has no
+  attribute 'graph'` instead — worth remembering if that exact error
+  shows up again in a test run, since the real cause is almost
+  certainly a missing/broken dependency import inside the patched
+  module's import chain, not a genuinely missing attribute.
+- **B-018 (this session):** a real bug in
+  `verification/self_consistency.py`'s own number-extraction regex
+  (`\b` after `%` never matches), found and fixed during this session's
+  own test-writing — see `debug.md`. Not a regression in existing code.
+- **Regression status:** 180/180 across the full 12-file test suite
+  (added `test_phase6_answerability.py`, `test_phase6_self_consistency.py`,
+  `test_phase6_graph_wiring.py` this session; updated
+  `test_phase5_graph.py`'s scripted-reply sequences for the two new
+  model calls now in every agentic graph run). Zero regressions in
+  previously-passing behavior.
+- **B-011 through B-018 all confirmed/fixed** — B-018 is new this
+  session (see above), otherwise unchanged from Entry 027.
 - **Latency:** still an open, unresolved-cause variance question — see
-  D-029. Not re-investigated this session.
-- **Next phase:** macOS and Linux builds for Phase 8 (each needs
-  running on that actual OS), OR finish Phase 6 (`answerability.py`,
-  `self_consistency.py`) — both legitimate next steps.
-- **Blockers:** none for Windows (done). macOS/Linux builds need those
-  actual OSes — not possible in this sandbox or from Windows.
+  D-029. Not re-investigated this session (though see the new
+  self-consistency cost question above, which is related but distinct).
+- **Next phase:** two legitimate, independent next steps, same as
+  before this session started: (1) real-hardware confirmation of this
+  session's Phase 6 work — specifically, run a query that should trigger
+  the `answerability_pre` short-circuit, one that shouldn't, and one
+  complex enough to exercise `self_consistency` for real, and report
+  timing + output for each; (2) macOS and Linux builds for Phase 8.
+- **Blockers:** none for the code itself. Real-hardware confirmation
+  needs an actual machine with the model downloaded (same as every
+  prior phase); macOS/Linux builds need those actual OSes per D-005.
 
 ---
 
 ## Log (newest first)
+
+### Entry 029
+**Phase:** 6, follow-up to Entry 028
+**Action taken:** resolved the two items Entry 028 had explicitly left
+open rather than fixed: (1) `enable_self_consistency` now defaults to
+`False` in `build_graph()`/`run_agentic()` — Entry 028 had flagged the
+cost as unresolved while still shipping it on by default, which wasn't
+actually a resolution; (2) `code_logic.md` §3 step 5's citation-check
+mislabel is now corrected to attribute the fast-path structural check
+to `guardrail.output_rail`, and §7 updated to state the real sampling
+temperature (0.7) and the new default. Along the way, introduced and
+immediately caught a self-inflicted `SyntaxError` in `rag/graph.py`
+(a dropped closing `):` from the default-flip edit) — caught by
+re-running the regression suite, not by re-reading the diff.
+**Decisions logged this run:** D-046.
+**Regression status:** 180/180 across the full 12-file suite, confirmed
+after fixing the syntax error the same edit introduced.
+**Next action for next session:** unchanged from Entry 028 — real-
+hardware confirmation of Phase 6 (now with `self_consistency` off by
+default, so that confirmation run should explicitly pass
+`enable_self_consistency=True` to actually exercise it), and macOS/
+Linux builds for Phase 8.
+
+### Entry 028
+**Phase:** 6, completion
+**Action taken:** built the two remaining Phase 6 modules
+(`verification/answerability.py`, `verification/self_consistency.py`)
+and wired both into the fast path (`main.py`) and agentic path
+(`rag/graph.py`) per `code_logic.md` §3/§4/§6/§7. Added a `temperature`
+parameter to `rag/synthesis.generate()` (default unchanged) so
+self-consistency could resample without duplicating logic. Updated
+`test_phase5_graph.py`'s scripted-reply sequences for the two new model
+calls per graph run (and disabled self-consistency in that suite, since
+it tests retry-loop logic, not verification). Wrote three new test
+files. Along the way, found and fixed a real regex bug in the new
+self-consistency module's own fact-extraction (B-018), and diagnosed a
+misleading sandbox error (`ModuleNotFoundError` for `rank_bm25` getting
+masked by `unittest.mock.patch`'s dotted-path resolution into an
+unrelated-looking `AttributeError`) that turned out to be a sandbox
+dependency gap, not a code bug.
+**Decisions logged this run:** D-045 — full design writeup for both new
+modules, the explicit self-consistency cost tradeoff, and a
+doc-consistency note about `code_logic.md` §3 step 5.
+**Debug entries logged this run:** B-018 — `_NUMBER_PATTERN`'s trailing
+`\b` never matched after a `%` sign; fixed by dropping it.
+**Phase 6 exit criteria met?** Code-complete, not fully met — see
+"Current state" above for what's still outstanding (eval-set metric
+tracking, real-hardware confirmation).
+**Regression status:** 180/180 across the full 12-file suite, zero
+regressions.
+**Next action for next session:** real-hardware confirmation of this
+session's Phase 6 work (see "Next phase" above for the specific query
+types to try), and separately, macOS/Linux builds for Phase 8 whenever
+those OSes are available — both remain legitimate, independent next
+steps.
 
 ### Entry 027
 **Phase:** 8, real confirmation (Windows)

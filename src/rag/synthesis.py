@@ -139,6 +139,7 @@ def generate(
     max_tokens: int = 512,
     on_token=None,
     conversation_context: str = "",
+    temperature: float = 0.3,
 ) -> tuple[str, list[Citation]]:
     """Core synthesis call, shared by the fast path (Phase 4) and the
     agentic path's SYNTHESIS node (Phase 5). Returns (answer_text,
@@ -157,6 +158,12 @@ def generate(
     router, or retrieval -- see D-041 for why injecting it earlier would
     break the router's word-count heuristic and pollute retrieval
     keyword-matching with old-topic terms.
+
+    `temperature`, default 0.3 (unchanged from the original hardcoded
+    value -- every existing caller keeps identical behavior). Exposed
+    per decisions.md D-045 so verification/self_consistency.py (Phase 6)
+    can request higher-temperature resampling of the SAME query/chunks
+    without duplicating this whole function.
     """
     if not chunks:
         # No retrieved evidence at all -- do not let the model answer
@@ -190,7 +197,7 @@ def generate(
             {"role": "user", "content": user_prompt},
         ],
         max_tokens=max_tokens,
-        temperature=0.3,
+        temperature=temperature,
         on_token=on_token,
     )
     answer = _smooth_truncation(answer.strip())

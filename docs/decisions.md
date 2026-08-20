@@ -1321,5 +1321,156 @@ noted so it isn't mistaken for a regression later.
 **Verification:** real build + real standalone execution + real
 grounded, correctly-cited answer, all on real Windows hardware.
 
+### D-045 — Phase 6 completed: `answerability.py` + `self_consistency.py` built and wired
+**Phase:** 6
+**Finding/Decision:** built the two remaining Phase 6 modules per
+`code_logic.md` §6/§7 and wired them into both paths.
+
+`verification/answerability.py` mirrors `core/domain_gate.py`'s shape
+exactly (cheap single classifier call, `CONFIDENCE_THRESHOLD=0.6`,
+fail-open to "answerable, flagged" on parse failure, never a silent
+unflagged pass and never an unwarranted refusal on a parsing hiccup).
+Unlike `citation_verifier.py` (a HEAVY call, agentic-only per
+D-006/D-032), this check is cheap enough to run on both paths, matching
+`code_logic.md` §3's placement (before synthesis) and §6's "runs both
+pre-retrieval and post-retrieval on the agentic path" spec:
+- **Agentic path** (`rag/graph.py`): new `answerability_pre` node runs
+  BEFORE `planner` -- a definite false-premise hit here skips
+  planning/retrieval/curation/sufficiency/synthesis entirely (routed
+  straight to `END` via a new conditional edge), since this is the one
+  place catching the problem early actually saves real cost rather than
+  just adding a caveat after the fact. The existing `verification` node
+  (after `synthesis`) gets a second, evidence-aware re-check per
+  `code_logic.md`'s "re-checked here for agentic multi-hop drift" --
+  this one CAVEATS the existing answer rather than discarding
+  already-paid-for synthesis work.
+- **Fast path** (`main.py`): one evidence-aware check after rerank,
+  before synthesis, matching `code_logic.md` §3 step 3 exactly. Skipped
+  entirely in `--mode quick` -- quick mode's whole purpose (D-027) is
+  minimizing LLM calls, and this is exactly the kind of extra call that
+  mode exists to avoid; deep mode pays it since deep mode's stated
+  priority is accuracy over latency. A definite-failure verdict returns
+  early (same pattern as the existing domain-refusal branch just above
+  it), bypassing `output_rail` entirely -- routing it through
+  `output_rail`'s `require_citations` check would have rejected the
+  citation-free refusal message and silently replaced it with the
+  generic failure text instead.
+
+`verification/self_consistency.py`: agentic-path only, per
+`code_logic.md` §4 ("if agentic_path: self_consistency..."), wired into
+the same `verification` node. Resamples synthesis at
+`SAMPLE_TEMPERATURE=0.7` (higher than synthesis's default 0.3 --
+deliberately, so genuinely uncertain claims have room to actually vary;
+low-temperature resampling would make every sample nearly identical
+regardless of underlying uncertainty and defeat the check's purpose).
+Extracts a bounded, dependency-free "fact" set per sample (numbers/
+percentages, years, capitalized multi-word entities via regex -- same
+"cheap heuristic beats an NLP dependency we can't afford" philosophy as
+`core/text_utils.py`, given `trd.md` §1's CPU/<6GB constraint) and flags
+any fact from the primary answer not corroborated by every resample.
+
+**Explicit cost tradeoff, stated plainly (not buried):** self-consistency
+adds a full EXTRA synthesis call to every agentic-path query. Given this
+project's own measured per-call latency (D-022: ~140-3277s, cause of the
+variance still unresolved per D-029), this is real, uncertain latency
+added by default, not a cheap check. Mitigations: `N_SAMPLES=2` (the
+observable minimum -- one extra call, not the 2-3 `code_logic.md` §7
+allows for), and a new `enable_self_consistency` parameter threaded
+through `build_graph()`/`run_agentic()` so this can be disabled without
+a code change once real-hardware timing data for it specifically exists.
+Recommend real-hardware confirmation treats this as its own timing
+question, not folded into the existing latency backlog.
+
+`rag/synthesis.generate()` gained a `temperature: float = 0.3` parameter
+(default unchanged, every existing caller behaves identically) so
+`self_consistency.py` can request a resample without duplicating the
+whole function.
+
+**Doc-consistency note** (per `workflow.md` §5): `code_logic.md` §3 step
+5 describes `citation_verifier.check(answer, results)` as a "structural:
+tag present + ID resolves" check running on the fast path -- but that
+structural check is actually already implemented elsewhere
+(`rag/synthesis._extract_citations` + `core/guardrail.output_rail`), and
+the real `citation_verifier.py` module is a HEAVY LLM entailment call,
+deliberately agentic-only per D-006/D-032. This mismatch predates this
+session's work and wasn't introduced or fixed here -- flagging it now
+per the conflict-resolution rule (favor `decisions.md` over
+`code_logic.md` convenience) rather than silently leaving it
+undocumented. `code_logic.md` §3 step 5's wording should be corrected in
+a future doc-only pass to describe the structural check that actually
+runs on the fast path, without implying `citation_verifier.py` itself
+runs there.
+**Files touched:** `src/verification/answerability.py` (new),
+`src/verification/self_consistency.py` (new), `src/rag/graph.py`,
+`src/rag/synthesis.py`, `src/main.py`, `test_phase5_graph.py` (updated
+scripted-reply sequences for the two new model calls per graph run,
+`enable_self_consistency=False` added since that suite tests retry-loop
+logic, not verification), `test_phase6_answerability.py` (new),
+`test_phase6_self_consistency.py` (new), `test_phase6_graph_wiring.py`
+(new -- covers the `answerability_pre` short-circuit, the ambiguous
+pass-through case, and self-consistency's flag-on-divergence and
+disable-via-flag behavior directly against the compiled graph).
+**Verification:** 180/180 across the full 12-file regression sweep
+(stub-model based -- this sandbox still can't load the real GGUF model,
+same standing limitation as every other phase). NOT yet verified: real
+model + real hardware, same gap as every phase before real-hardware
+confirmation happens.
+**Phase 6 exit criteria met?** Code-complete: all three planned modules
+now exist and are wired (`citation_verifier.py` was already confirmed
+working; `answerability.py` and `self_consistency.py` are new this
+session). Per-claim citation accuracy metric (`trd.md` §7) still needs
+real eval-set tracking, not just unit-level confirmation -- that's a
+distinct, still-open piece of Phase 6's exit criteria, not resolved by
+this session's work alone.
+
+---
+
+### D-046 — `self_consistency` cost tradeoff resolved: default flipped to OFF; `code_logic.md` corrected
+**Phase:** 6, follow-up to D-045
+**Finding/Decision:** D-045 shipped `enable_self_consistency` defaulting
+to `True` (matching `code_logic.md` §7's spec) while simultaneously
+flagging, unresolved, that this adds a full extra synthesis call to
+every agentic query against an already-uncertain per-call latency
+profile (D-022/D-029: ~140-3277s, cause of variance still unresolved).
+Leaving a known, unmeasured cost defaulted ON and calling it "flagged"
+was not actually a resolution -- it deferred the decision while still
+shipping the more expensive behavior by default. Fixing that now:
+`enable_self_consistency` defaults to **False** in both
+`build_graph()` and `run_agentic()` (`rag/graph.py`). `main.py`'s
+agentic-path call site left at the default (with an inline comment
+explaining why), rather than passed explicitly, so flipping the default
+back once real-hardware timing data exists doesn't require touching
+`main.py` at all.
+
+Also corrected `code_logic.md` §3 step 5, which mislabeled a fast-path
+structural citation check as `citation_verifier.check()` (flagged as a
+pre-existing doc inconsistency in D-045, not fixed there) -- it now
+correctly attributes that structural check to `guardrail.output_rail`,
+with an explicit note that `citation_verifier.py` itself is the
+separate, heavy, agentic-only entailment call. `code_logic.md` §7 also
+updated to state the actual implemented sampling temperature (0.7, not
+"low temperature" as originally sketched) and to document the new
+default explicitly, so the spec doc matches the shipped code rather
+than the other way around.
+
+**Self-inflicted bug caught and fixed in the same pass:** the
+`str_replace` that changed `build_graph()`'s default from `True` to
+`False` dropped the function signature's closing `):` in the
+replacement text, breaking `rag/graph.py` with a `SyntaxError: '(' was
+never closed`. Caught immediately by re-running the regression suite
+(the correct discipline here, not by re-reading the diff and assuming
+it was fine) — fixed by restoring the closing `):` before the
+docstring. Not logged as a numbered `B-XXX` bug since it never reached
+a committed state; call it out here for the record rather than pretend
+the first edit was clean.
+**Files touched:** `src/rag/graph.py`, `src/main.py`, `docs/code_logic.md`.
+**Verification:** 180/180 across the full 12-file regression suite,
+confirmed AFTER fixing the syntax error above (the sweep is what
+caught it).
+**Still open:** the same real-hardware timing gap D-045 named --
+nothing about this follow-up changes that. `self_consistency` remains
+implemented and testable, just off by default until it's actually been
+timed on real hardware.
+
 ---
 **Return to `/context.md` for next steps.**

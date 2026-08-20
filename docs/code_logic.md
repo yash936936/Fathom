@@ -33,9 +33,12 @@ input: in-domain query
 2. reranker.rerank(results, top_k)
 3. answerability.check(query, results)     # quick pre-check
 4. synthesis.generate(query, results)      # forced per-claim citations
-5. citation_verifier.check(answer, results) # structural: tag present + ID resolves
-6. guardrail.output_rail(answer)
-7. return answer
+5. guardrail.output_rail(answer)           # structural: tag present + ID resolves
+                                            # (NOT citation_verifier.py -- that's a
+                                            # HEAVY per-claim entailment call, deliberately
+                                            # agentic-path-only per D-006/D-032; see D-045
+                                            # for the correction of this earlier mislabel)
+6. return answer
 ```
 
 ## 4. Agentic path (`rag/graph.py`, LangGraph)
@@ -128,11 +131,23 @@ Runs both pre-retrieval (cheap check on query alone) and post-retrieval
 ## 7. Self-consistency check (`verification/self_consistency.py`, agentic path only)
 ```
 input: query, retrieved context
-1. sample synthesis N times (N=2-3) at low temperature
+1. sample synthesis N times (N=2, the observable minimum -- see D-045
+   for why NOT the 2-3 range originally sketched here) at a HIGHER
+   temperature than default synthesis (0.7 vs 0.3 -- deliberately: a
+   genuinely uncertain claim needs room to actually vary across samples
+   for this check to detect anything; low-temperature resampling makes
+   every sample nearly identical regardless of underlying uncertainty
+   and defeats the point)
 2. compare key factual claims (numbers, dates, named entities) across samples
 3. if high variance on a claim: flag as low-confidence, caveat in final answer
    rather than silently presenting it as certain
 ```
+Gated behind `enable_self_consistency` (default **False** as of D-045 §2 —
+see decisions.md: each additional sample is a full extra synthesis call,
+and this project's own measured per-call latency (D-022/D-029: ~140-3277s,
+cause of variance still unresolved) makes an unconditional-on default an
+unresolved cost, not a settled one. Turn on explicitly once real-hardware
+timing data for this check specifically exists.)
 
 ## 8. Guardrail output rail (`core/guardrail.py`)
 ```

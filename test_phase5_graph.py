@@ -45,17 +45,26 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
 
     model = StubModel(
         [
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability_pre (Phase 6)
             '{"sub_queries": ["fusion energy progress"], "requires_recency": true}',  # planner
             '{"sufficient": true, "gap": "", "search_query": ""}',  # sufficiency check -- passes immediately
             "Fusion energy has progressed significantly [web:0].",  # synthesis
-            '[{"index": 0, "supported": true}]',  # verification
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability post-check (Phase 6)
+            '[{"index": 0, "supported": true}]',  # citation verification
         ]
     )
-    final_state = run_agentic("What's the latest fusion energy progress?", model)
+    # enable_self_consistency=False here -- this suite is about the
+    # retry-loop/routing logic, not verification behavior (that's
+    # test_phase6_*.py's job); see decisions.md D-045.
+    final_state = run_agentic("What's the latest fusion energy progress?", model, enable_self_consistency=False)
     check("graph completes with sufficient=True on first pass", final_state.get("sufficiency") is True)
     check("graph completes with retry_count still 0", final_state.get("retry_count", 0) == 0)
     check("graph produces a non-empty answer", bool(final_state.get("answer")))
-    check("all 4 scripted model calls were consumed (planner, sufficiency, synthesis, verification)", len(model.call_log) == 4)
+    check(
+        "all 6 scripted model calls were consumed (answerability-pre, planner, "
+        "sufficiency, synthesis, answerability-post, citation verification)",
+        len(model.call_log) == 6,
+    )
 
 # --- Test 2: insufficient once, then sufficient -- retry loop actually cycles ---
 with patch("rag.graph.retrieve", side_effect=fake_retrieve):
@@ -63,17 +72,23 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
 
     model2 = StubModel(
         [
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability_pre
             '{"sub_queries": ["fusion energy progress"], "requires_recency": true}',  # planner
             '{"sufficient": false, "gap": "need more specific recent data", "search_query": "fusion energy 2026 progress"}',  # 1st sufficiency check -- insufficient
             '{"sufficient": true, "gap": "", "search_query": ""}',  # 2nd sufficiency check (after retry) -- sufficient
             "Fusion energy has progressed [web:0].",  # synthesis
-            '[{"index": 0, "supported": true}]',  # verification
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability post-check
+            '[{"index": 0, "supported": true}]',  # citation verification
         ]
     )
-    final_state2 = run_agentic_2("What's the latest fusion energy progress?", model2)
+    final_state2 = run_agentic_2("What's the latest fusion energy progress?", model2, enable_self_consistency=False)
     check("retry loop incremented retry_count exactly once", final_state2.get("retry_count") == 1)
     check("graph eventually reaches sufficient=True after retry", final_state2.get("sufficiency") is True)
-    check("all 5 scripted model calls were consumed (retry loop actually ran, plus verification)", len(model2.call_log) == 5)
+    check(
+        "all 7 scripted model calls were consumed (answerability-pre, retry loop, "
+        "synthesis, answerability-post, citation verification)",
+        len(model2.call_log) == 7,
+    )
 
 # --- Test 3: always insufficient -- retry cap is respected, doesn't loop forever ---
 with patch("rag.graph.retrieve", side_effect=fake_retrieve):
@@ -82,12 +97,14 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
 
     always_insufficient = ['{"sufficient": false, "gap": "still missing data", "search_query": "query still missing"}'] * (MAX_RETRIES + 1)
     model3 = StubModel(
-        ['{"sub_queries": ["q"], "requires_recency": false}']
+        ['{"answerable": true, "confidence": 0.9, "reason": ""}']  # answerability_pre
+        + ['{"sub_queries": ["q"], "requires_recency": false}']
         + always_insufficient
         + ["Best-effort answer given incomplete evidence [web:0]."]
-        + ['[{"index": 0, "supported": true}]']  # verification
+        + ['{"answerable": true, "confidence": 0.9, "reason": ""}']  # answerability post-check
+        + ['[{"index": 0, "supported": true}]']  # citation verification
     )
-    final_state3 = run_agentic_3("some query", model3)
+    final_state3 = run_agentic_3("some query", model3, enable_self_consistency=False)
     check(f"retry cap respected -- retry_count == MAX_RETRIES ({MAX_RETRIES})", final_state3.get("retry_count") == MAX_RETRIES)
     check("gap is surfaced in the final answer, not silently dropped", "missing data" in final_state3.get("answer", "") or "incomplete" in final_state3.get("answer", "").lower())
 
@@ -117,14 +134,16 @@ with patch("rag.graph.retrieve", side_effect=incrementing_retrieve):
 
     model4 = StubModel(
         [
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability_pre
             '{"sub_queries": ["original query"], "requires_recency": false}',
             '{"sufficient": false, "gap": "missing fission reactor data", "search_query": "small modular reactor 2026"}',
             '{"sufficient": true, "gap": "", "search_query": ""}',
             "Final answer [web:1][web:2].",
-            '[{"index": 0, "supported": true}, {"index": 1, "supported": true}]',  # verification
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability post-check
+            '[{"index": 0, "supported": true}, {"index": 1, "supported": true}]',  # citation verification
         ]
     )
-    final_state4 = run_agentic_4("compare X and Y", model4)
+    final_state4 = run_agentic_4("compare X and Y", model4, enable_self_consistency=False)
     check(
         "retry appends the refined search_query (not the prose gap) as a new sub_query",
         "small modular reactor 2026" in final_state4.get("sub_queries", [])
@@ -173,14 +192,16 @@ with patch("rag.graph.retrieve", side_effect=reset_per_call_retrieve):
 
     model5 = StubModel(
         [
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability_pre
             '{"sub_queries": ["query A"], "requires_recency": false}',
             '{"sufficient": false, "gap": "need more", "search_query": "query B"}',
             '{"sufficient": true, "gap": ""}',
             "Answer citing both [news:0][news:1].",
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability post-check
             '[{"index": 0, "supported": true}, {"index": 1, "supported": true}]',
         ]
     )
-    final_state5 = run_agentic_5("original query", model5)
+    final_state5 = run_agentic_5("original query", model5, enable_self_consistency=False)
     ids5 = [c["source_id"] for c in final_state5.get("retrieved_chunks", [])]
     check(
         "B-015 (targeted): two chunks that would collide as 'news:0' both from "
