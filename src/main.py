@@ -103,6 +103,16 @@ def build_parser() -> argparse.ArgumentParser:
         "Follow-up questions can reference prior answers in the same "
         "session. Type 'exit' or 'quit' to leave, or Ctrl+C/Ctrl+D.",
     )
+    parser.add_argument(
+        "--self-consistency",
+        action="store_true",
+        help="Enable self_consistency.py on the agentic path (off by "
+        "default as of D-046 -- adds a full extra synthesis call per "
+        "query; see decisions.md D-045/D-046 for the unresolved "
+        "real-hardware latency cost this is meant to help measure). "
+        "No effect in --mode quick or on queries that route to the "
+        "fast/simple path.",
+    )
     return parser
 
 
@@ -117,6 +127,7 @@ def run_query(
     stream_tokens: bool,
     debug_report: Callable[[str], None] | None = None,
     conversation_context: str = "",
+    enable_self_consistency: bool = False,
 ) -> tuple[str, str, list[str], bool]:
     """Returns (answer_text, sources_block, flags, already_streamed).
 
@@ -136,6 +147,11 @@ def run_query(
     history from --chat mode's ConversationBuffer. Threaded ONLY into
     synthesis (both paths) -- domain_gate, router, and retrieval all
     still see just `query` on its own, unchanged. See D-041 for why.
+
+    `enable_self_consistency`, default False (D-046) -- see
+    rag/graph.py's run_agentic() docstring. Only affects the agentic
+    path; the fast path never runs self-consistency at all (it's not
+    in code_logic.md §3's spec for that path).
     """
     state = new_state(query)
 
@@ -177,12 +193,14 @@ def run_query(
         report("Planning multi-step research")
         from rag.graph import run_agentic
 
-        # enable_self_consistency left at its default (False, per
-        # D-045 §2 update) -- unresolved real-hardware cost, not yet
-        # worth paying on every agentic query by default.
+        # enable_self_consistency defaults to False (D-045 §2 / D-046)
+        # -- unresolved real-hardware cost. Now exposed via --self-
+        # consistency for exactly the real-hardware timing runs D-045/
+        # D-046 called for, rather than staying only settable from code.
         final_state = run_agentic(
             query, model, top_k=top_k, report=report, debug_report=debug_report,
             conversation_context=conversation_context,
+            enable_self_consistency=enable_self_consistency,
         )
         answer = final_state.get("answer", "")
         chunks = final_state.get("retrieved_chunks", [])
@@ -359,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             report=report,
             stream_tokens=False,
             debug_report=debug_report,
+            enable_self_consistency=args.self_consistency,
         )
         print(answer)
     else:
@@ -372,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
                 top_k=args.top_k,
                 report=report,
                 stream_tokens=False,
+                enable_self_consistency=args.self_consistency,
             )
         # Spinner's __exit__ has already cleared the line by this point.
         print(answer)

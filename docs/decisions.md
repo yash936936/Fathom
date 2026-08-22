@@ -1472,5 +1472,76 @@ nothing about this follow-up changes that. `self_consistency` remains
 implemented and testable, just off by default until it's actually been
 timed on real hardware.
 
+### D-047 — `--self-consistency` CLI flag added, for the real-hardware confirmation D-045/D-046 called for
+**Phase:** 6, follow-up to D-045/D-046
+**Finding/Decision:** D-046 flipped `enable_self_consistency`'s default
+to `False` but left it only settable from Python code, not from the
+CLI -- meaning the real-hardware timing run both D-045 and D-046
+explicitly called for had no way to actually turn the feature on
+without editing source. Added `--self-consistency` to `build_parser()`
+and threaded it through `run_query()` into `run_agentic()`. No default
+change (still off unless passed) -- this is purely closing the gap
+between "the flag exists in code" and "a person on real hardware can
+exercise it."
+**Files touched:** `src/main.py`.
+**Verification:** 180/180 regression sweep, unchanged behavior when the
+flag isn't passed (confirmed by the existing suite, none of which pass
+it). The flag itself needs real-hardware exercise, same standing gap
+as everything else in Phase 6 -- see status.md's testing commands.
+
+### D-048 — Per-claim citation accuracy metric established and tracked (`trd.md` §7 / Phase 6 exit criteria)
+**Phase:** 6, closing the one remaining exit-criteria item
+**Finding/Decision:** built `tests/eval/citation_accuracy_eval.py`, a
+Phase-6-scoped eval harness -- deliberately NOT Phase 10's full
+`golden_set.jsonl` suite (see `tests/eval/README.md` for the scope
+split, added to prevent this file from later being confused with or
+duplicated by Phase 10's work). Metric definition:
+
+    accuracy = verified / (verified + unverified)
+
+computed from `verification/citation_verifier.py`'s own entailment
+verdicts, aggregated across every citation produced by
+`tests/eval/phase6_citation_queries.jsonl`'s 12 queries run through the
+REAL agentic path (`run_agentic()` called directly, bypassing the
+router -- `citation_verifier` is agentic-path-only per D-006/D-032, so
+forcing that path is the only way to get a signal at all). `unchecked`
+citations are tracked and reported separately, never folded into the
+accuracy ratio -- an unresolved verdict is neither a confirmed pass nor
+a confirmed failure, and counting it as either would misrepresent what
+was actually checked. A single query's exception (e.g. a retrieval tool
+failing) is caught and recorded rather than aborting the whole run, so
+one bad query doesn't discard every other query's real signal.
+
+`append_to_log()` writes one dated entry per run to the new
+`docs/eval_log.md`, never overwriting prior entries -- this is what
+makes the metric "tracked" per `phases.md`'s exit-criteria wording
+(established AND tracked), not just computable once and forgotten.
+That file deliberately has no `Return to /context.md` trailer, unlike
+every other `/docs/*.md` file -- since entries are appended
+automatically, a trailer would end up sandwiched mid-file after the
+first real run rather than staying at the true end.
+
+**What this does and does NOT close:** this establishes the metric and
+the tracking mechanism, and validates its arithmetic/aggregation logic
+end-to-end against a stub model (same "sandbox confirms mechanics, real
+hardware confirms substance" split as every other phase in this
+project -- see `test_phase6_citation_eval_harness.py`, 18/18 passing).
+It does NOT produce a real number -- this sandbox has no real model and
+no access to the retrieval tools' external APIs (web search etc. are
+outside the network allowlist here), so an actual accuracy figure can
+only come from running `python tests/eval/citation_accuracy_eval.py` on
+real hardware. `docs/eval_log.md` explicitly says no real entry has
+been logged yet, rather than implying this is done.
+**Files touched:** `tests/eval/README.md` (new), `tests/eval/
+citation_accuracy_eval.py` (new), `tests/eval/
+phase6_citation_queries.jsonl` (new, 12 queries), `docs/eval_log.md`
+(new), `test_phase6_citation_eval_harness.py` (new, sandbox validation).
+**Verification:** 198/198 across the full 13-file regression sweep.
+**Still open:** the actual real-hardware run and its resulting number
+-- same standing gap named in D-045/D-046/D-047 and status.md's current
+"on hold" note. This decision closes the MECHANISM gap in Phase 6's
+exit criteria, not the DATA gap; both were real, and only the first is
+fixed here.
+
 ---
 **Return to `/context.md` for next steps.**

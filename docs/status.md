@@ -7,6 +7,13 @@
 ---
 
 ## Current state
+- **ON HOLD:** real-hardware confirmation commands for Phase 6 and the
+  macOS/Linux Phase 8 builds were handed off (see D-047's commands),
+  but execution is paused at the user's request pending a separate
+  discussion of what's next. Nothing below this line should be treated
+  as confirmed until the user reports back with actual command output
+  -- do not mark Phase 6 or Phase 8 (macOS/Linux) as done based on
+  anything in this file alone.
 - **Active phase:** Phase 6 — now CODE-COMPLETE. All three planned
   modules exist and are wired: `citation_verifier.py` (previously
   confirmed working), and this session's new
@@ -16,11 +23,13 @@
   `verification` node). See D-045 for full design writeup, including an
   explicit, unresolved cost tradeoff on `self_consistency.py` (adds a
   full extra synthesis call to every agentic query — see below).
-- **Phase 6 exit criteria:** code-complete, but NOT fully met — the
-  per-claim citation accuracy metric (`trd.md` §7) still needs real
-  eval-set tracking, and none of this session's work has been confirmed
-  on real hardware yet (stub-model tests only, same standing sandbox
-  limitation as every phase).
+- **Phase 6 exit criteria:** the metric-mechanism gap is now CLOSED
+  (D-048) — `tests/eval/citation_accuracy_eval.py` establishes and
+  tracks per-claim citation accuracy per `trd.md` §7, validated
+  end-to-end with a stub model (18/18). What's still open is the DATA:
+  no real run has happened yet, so `docs/eval_log.md` has zero real
+  entries. That's part of the same "ON HOLD" real-hardware batch below,
+  not a separate gap.
 - **Windows packaging (Phase 8): still done, unchanged** — real build,
   real hook firing, real standalone execution, real grounded answer
   (D-044). Not touched this session.
@@ -769,3 +778,35 @@ log the actual measured footprint here once available.
 
 ---
 **Return to `/context.md` for next steps.**
+
+### Entry 031
+**Phase:** 6, closing the metric-mechanism gap (D-048)
+**Action taken:** built `tests/eval/citation_accuracy_eval.py` (a
+Phase-6-scoped eval harness, distinct from Phase 10's future
+`golden_set.jsonl` — see `tests/eval/README.md`), a 12-query fixture
+set, and `docs/eval_log.md` as the running, append-only log the harness
+writes to. Validated the harness's aggregation/reporting logic with a
+stub model in `test_phase6_citation_eval_harness.py` (18/18).
+**Decisions logged this run:** D-048.
+**Regression status:** 198/198 across the full 13-file suite.
+**What this closes:** the mechanism half of Phase 6's remaining exit
+criterion ("metric established and tracked"). The data half — an
+actual real-hardware run producing a real accuracy number — is still
+open, and folds into the same real-hardware batch already on hold per
+Entry 030 (real hardware still needed for: Phase 6 answerability/self-
+consistency confirmation, macOS/Linux Phase 8 builds, and now this
+eval run too — `python tests/eval/citation_accuracy_eval.py`).
+**Next action for next session:** unchanged in kind from Entry 030 —
+still waiting on the user's real-hardware command output before any of
+these can be marked done. Added the eval harness run to that same
+waiting list rather than treating it as a new, separate ask.
+
+### Entry 030
+**Phase:** 6/8, on hold
+**Action taken:** none — handed off testing commands for Phase 6
+real-hardware confirmation and macOS/Linux Phase 8 builds (see D-047's
+command list). User requested a pause: they'll discuss next steps first
+and report command output afterward before this proceeds.
+**Next action for next session:** wait for the user to provide real
+command output. Do not run further code changes against Phase 6/8
+assuming success — confirm from their actual output first.
