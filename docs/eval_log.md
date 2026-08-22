@@ -24,7 +24,8 @@ end of this file automatically, so a trailer here would end up
 sandwiched in the middle after the first real run instead of staying
 at the true end.)
 
-### 2026-08-22 18:42 UTC
-**Hardware:** (unspecified)
-**Queries run:** 12 (1 errored)
-**Per-claim citation accuracy:** 42.3% (11 verified / 15 unverified / 18 unchecked)
+Two kinds of entries land here: single-judge accuracy runs (`python
+tests/eval/citation_accuracy_eval.py`) and Qwen-vs-judge comparison
+runs (`python tests/eval/citation_accuracy_eval.py --with-judge`,
+D-049/D-050) — the comparison entries are headed "Qwen vs. Llama-3.1-8B
+judge comparison" so the two are easy to tell apart at a glance.

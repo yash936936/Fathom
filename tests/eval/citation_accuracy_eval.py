@@ -98,12 +98,23 @@ def run_eval(
     top_k: int = 8,
     enable_self_consistency: bool = False,
     report=None,
+    debug_report=None,
 ) -> EvalReport:
     """Runs every query through the real agentic path (forced, per this
     module's docstring) and aggregates citation_verifier's verdicts.
     A per-query failure (e.g. a retrieval tool erroring out) is caught
     and recorded rather than aborting the whole run -- one bad query
     shouldn't discard every other query's real signal.
+
+    `debug_report`, if given, is threaded straight into run_agentic()'s
+    own debug_report -- per-node progress (answerability verdicts,
+    retrieval counts, sufficiency checks) becomes visible per query.
+    Added after the first real-hardware run produced 5/12 queries with
+    verified=unverified=unchecked=0 (a fully empty citations list) with
+    no way to tell whether that came from answerability_pre correctly
+    (or incorrectly) refusing, a genuine zero-evidence retrieval, or
+    something else -- see status.md Entry 034. Without this, that
+    question is structurally unanswerable from the eval output alone.
     """
     eval_report = EvalReport()
     for i, query in enumerate(queries, 1):
@@ -111,7 +122,8 @@ def run_eval(
             report(f"[{i}/{len(queries)}] {query}")
         try:
             final_state = run_agentic(
-                query, model, top_k=top_k, enable_self_consistency=enable_self_consistency
+                query, model, top_k=top_k, enable_self_consistency=enable_self_consistency,
+                report=report, debug_report=debug_report,
             )
             citations = final_state.get("citations", [])
             verified, unverified, unchecked = summarize(citations)
@@ -174,6 +186,292 @@ def append_to_log(eval_report: EvalReport, hardware_note: str = "(unspecified)")
         f.write(entry)
 
 
+@dataclass
+class JudgeComparisonResult:
+    """One query's dual-judged outcome, per D-049's stated purpose:
+    "explicitly treat any Qwen3-4B-vs-external-judge disagreement...
+    as a signal worth logging." Qwen's verdicts are whatever
+    citation_verifier.py already produced during the normal agentic
+    run (D-006/D-032's runtime check); the judge's verdicts are a
+    SEPARATE, independent re-check of the exact same (claim,
+    source_id) pairs, computed after the fact by resetting `verified`
+    to None and re-running verify_citations() with JudgeModel in place
+    of FathomModel -- safe because verify_citations() only ever calls
+    `model.chat(...)`, and JudgeModel implements that same interface
+    (see judge_model.py's module docstring).
+    """
+    query: str
+    qwen_verified: int
+    qwen_unverified: int
+    judge_verified: int
+    judge_unverified: int
+    agreements: int
+    disagreements: int
+    error: str | None = None
+
+
+@dataclass
+class JudgeComparisonReport:
+    results: list[JudgeComparisonResult] = field(default_factory=list)
+
+    @property
+    def total_agreements(self) -> int:
+        return sum(r.agreements for r in self.results if r.error is None)
+
+    @property
+    def total_disagreements(self) -> int:
+        return sum(r.disagreements for r in self.results if r.error is None)
+
+    @property
+    def agreement_rate(self) -> float | None:
+        denom = self.total_agreements + self.total_disagreements
+        if denom == 0:
+            return None
+        return self.total_agreements / denom
+
+    @property
+    def qwen_accuracy(self) -> float | None:
+        v = sum(r.qwen_verified for r in self.results if r.error is None)
+        u = sum(r.qwen_unverified for r in self.results if r.error is None)
+        return v / (v + u) if (v + u) else None
+
+    @property
+    def judge_accuracy(self) -> float | None:
+        v = sum(r.judge_verified for r in self.results if r.error is None)
+        u = sum(r.judge_unverified for r in self.results if r.error is None)
+        return v / (v + u) if (v + u) else None
+
+
+def run_eval_with_judge(
+    queries: list[str],
+    model,
+    judge_model,
+    top_k: int = 8,
+    report=None,
+) -> JudgeComparisonReport:
+    """Two-phase run, per D-049's sequential-loading constraint (never
+    both models resident at once):
+
+    Phase A: run every query through the real agentic path with `model`
+    (Qwen3-4B) exactly as run_eval() does -- this is where
+    citation_verifier.py's OWN verdicts get produced, same as any
+    normal agentic run.
+
+    Phase B: for the SAME (claim, source_id) pairs already collected in
+    phase A, re-check with `judge_model` instead -- a fresh verdict,
+    not a reuse of Qwen's. Compares the two per-citation and tallies
+    agreement/disagreement.
+
+    Caller is responsible for `model` already being loaded and for
+    freeing it (del + gc.collect()) before constructing `judge_model`,
+    per D-049 -- this function doesn't do that itself, since it doesn't
+    own either model's lifecycle (see main_with_judge() below for the
+    actual sequencing).
+    """
+    from verification.citation_verifier import verify_citations, summarize
+
+    comparison = JudgeComparisonReport()
+    for i, query in enumerate(queries, 1):
+        if report:
+            report(f"[{i}/{len(queries)}] {query}")
+        try:
+            final_state = run_agentic(query, model, top_k=top_k, enable_self_consistency=False)
+            chunks = final_state.get("retrieved_chunks", [])
+            qwen_citations = final_state.get("citations", [])
+            qwen_verified, qwen_unverified, _ = summarize(qwen_citations)
+
+            # Independent re-check: reset verified to None so
+            # verify_citations() treats every citation as unchecked,
+            # exactly as it would on a fresh run -- otherwise it would
+            # skip everything, since Qwen already resolved them.
+            judge_input = [{**c, "verified": None} for c in qwen_citations]
+            judge_citations = verify_citations(judge_input, chunks, judge_model)
+            judge_verified, judge_unverified, _ = summarize(judge_citations)
+
+            agreements = 0
+            disagreements = 0
+            for qc, jc in zip(qwen_citations, judge_citations):
+                qv, jv = qc.get("verified"), jc.get("verified")
+                if qv is None or jv is None:
+                    continue  # an unchecked verdict on either side isn't
+                    # a comparable agreement/disagreement -- same
+                    # exclusion reasoning as EvalReport.accuracy's
+                    # handling of unchecked citations.
+                if qv == jv:
+                    agreements += 1
+                else:
+                    disagreements += 1
+
+            comparison.results.append(
+                JudgeComparisonResult(
+                    query=query, qwen_verified=qwen_verified, qwen_unverified=qwen_unverified,
+                    judge_verified=judge_verified, judge_unverified=judge_unverified,
+                    agreements=agreements, disagreements=disagreements,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 -- same reasoning as run_eval()
+            comparison.results.append(
+                JudgeComparisonResult(
+                    query=query, qwen_verified=0, qwen_unverified=0, judge_verified=0,
+                    judge_unverified=0, agreements=0, disagreements=0, error=str(exc),
+                )
+            )
+    return comparison
+
+
+def format_judge_comparison(comparison: JudgeComparisonReport) -> str:
+    lines = ["Per-query Qwen vs. judge comparison:"]
+    for r in comparison.results:
+        if r.error is not None:
+            lines.append(f"  ERROR  {r.query!r}: {r.error}")
+        else:
+            lines.append(
+                f"  qwen(v={r.qwen_verified},u={r.qwen_unverified}) "
+                f"judge(v={r.judge_verified},u={r.judge_unverified}) "
+                f"agree={r.agreements} disagree={r.disagreements}  {r.query!r}"
+            )
+    lines.append("")
+    qa = comparison.qwen_accuracy
+    ja = comparison.judge_accuracy
+    ar = comparison.agreement_rate
+    lines.append(f"Qwen3-4B self-judged accuracy:  {f'{qa:.1%}' if qa is not None else 'N/A'}")
+    lines.append(f"Llama-3.1-8B judge accuracy:    {f'{ja:.1%}' if ja is not None else 'N/A'}")
+    lines.append(f"Agreement rate:                 {f'{ar:.1%}' if ar is not None else 'N/A'}")
+    return "\n".join(lines)
+
+
+def append_judge_comparison_to_log(comparison: JudgeComparisonReport, hardware_note: str = "(unspecified)") -> None:
+    """Same append-only, never-overwrite pattern as append_to_log() --
+    a separate section within the same docs/eval_log.md so both the
+    single-judge accuracy history and the dual-judge comparison history
+    live in one place, per D-049."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    qa, ja, ar = comparison.qwen_accuracy, comparison.judge_accuracy, comparison.agreement_rate
+    entry = (
+        f"\n### {timestamp} (Qwen vs. Llama-3.1-8B judge comparison, D-049)\n"
+        f"**Hardware:** {hardware_note}\n"
+        f"**Queries run:** {len(comparison.results)} "
+        f"({sum(1 for r in comparison.results if r.error)} errored)\n"
+        f"**Qwen3-4B self-judged accuracy:** {f'{qa:.1%}' if qa is not None else 'N/A'}\n"
+        f"**Llama-3.1-8B judge accuracy:** {f'{ja:.1%}' if ja is not None else 'N/A'}\n"
+        f"**Agreement rate:** {f'{ar:.1%}' if ar is not None else 'N/A'} "
+        f"({comparison.total_agreements} agree / {comparison.total_disagreements} disagree)\n"
+    )
+    with open(_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
+def main_with_judge() -> int:
+    """Entry point for --with-judge: loads Qwen3-4B, runs phase A for
+    every query, EXPLICITLY frees it, then loads the judge for phase B.
+    Never both models resident at once -- see judge_model.py's module
+    docstring and D-049."""
+    import gc
+
+    from core.llm_backend import get_model, ModelNotFoundError
+    from judge_model import JudgeModel, JudgeModelNotFoundError
+
+    try:
+        model = get_model()
+    except (ModelNotFoundError, RuntimeError) as exc:
+        print(f"citation_accuracy_eval --with-judge: {exc}", file=sys.stderr)
+        return 2
+
+    queries = load_queries()
+
+    # Phase A: Qwen3-4B generates + self-judges, exactly as the normal
+    # agentic path always has. run_eval_with_judge does both phase A
+    # (via run_agentic) and phase B (via judge_model) internally, but
+    # we free `model` BEFORE constructing the judge, which is the part
+    # that actually needs sequencing -- see below.
+    #
+    # NOTE: run_eval_with_judge takes both models as arguments, so we
+    # need Qwen resident for phase A's run_agentic() calls and the
+    # judge resident for phase B's verify_citations() calls -- the
+    # cleanest way to guarantee they're never BOTH resident without
+    # restructuring run_eval_with_judge into two separate passes is to
+    # do phase A here directly, free Qwen, load the judge, then run
+    # phase B. That's what the block below does, rather than calling
+    # run_eval_with_judge() as one call with both models passed at
+    # once (which would require Qwen to still be in memory when the
+    # judge loads).
+    from rag.graph import run_agentic as _run_agentic
+    from verification.citation_verifier import summarize as _summarize
+
+    phase_a_results = []
+    for i, query in enumerate(queries, 1):
+        print(f"[phase A: Qwen3-4B, {i}/{len(queries)}] {query}", file=sys.stderr)
+        try:
+            final_state = _run_agentic(query, model, enable_self_consistency=False)
+            phase_a_results.append(
+                {
+                    "query": query,
+                    "chunks": final_state.get("retrieved_chunks", []),
+                    "citations": final_state.get("citations", []),
+                    "error": None,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            phase_a_results.append({"query": query, "chunks": [], "citations": [], "error": str(exc)})
+
+    del model
+    gc.collect()
+    print("Freed Qwen3-4B, loading judge model...", file=sys.stderr)
+
+    try:
+        judge_model = JudgeModel()
+    except JudgeModelNotFoundError as exc:
+        print(f"citation_accuracy_eval --with-judge: {exc}", file=sys.stderr)
+        return 2
+
+    from verification.citation_verifier import verify_citations
+
+    comparison = JudgeComparisonReport()
+    for i, r in enumerate(phase_a_results, 1):
+        print(f"[phase B: judge, {i}/{len(phase_a_results)}] {r['query']}", file=sys.stderr)
+        if r["error"] is not None:
+            comparison.results.append(
+                JudgeComparisonResult(
+                    query=r["query"], qwen_verified=0, qwen_unverified=0, judge_verified=0,
+                    judge_unverified=0, agreements=0, disagreements=0, error=r["error"],
+                )
+            )
+            continue
+        try:
+            qwen_verified, qwen_unverified, _ = _summarize(r["citations"])
+            judge_input = [{**c, "verified": None} for c in r["citations"]]
+            judge_citations = verify_citations(judge_input, r["chunks"], judge_model)
+            judge_verified, judge_unverified, _ = _summarize(judge_citations)
+
+            agreements = disagreements = 0
+            for qc, jc in zip(r["citations"], judge_citations):
+                qv, jv = qc.get("verified"), jc.get("verified")
+                if qv is None or jv is None:
+                    continue
+                agreements += qv == jv
+                disagreements += qv != jv
+
+            comparison.results.append(
+                JudgeComparisonResult(
+                    query=r["query"], qwen_verified=qwen_verified, qwen_unverified=qwen_unverified,
+                    judge_verified=judge_verified, judge_unverified=judge_unverified,
+                    agreements=agreements, disagreements=disagreements,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            comparison.results.append(
+                JudgeComparisonResult(
+                    query=r["query"], qwen_verified=0, qwen_unverified=0, judge_verified=0,
+                    judge_unverified=0, agreements=0, disagreements=0, error=str(exc),
+                )
+            )
+
+    print(format_judge_comparison(comparison))
+    append_judge_comparison_to_log(comparison)
+    print(f"\nLogged to {_LOG_PATH}")
+    return 0
+
+
 def main() -> int:
     from core.llm_backend import get_model, ModelNotFoundError
 
@@ -184,7 +482,11 @@ def main() -> int:
         return 2
 
     queries = load_queries()
-    eval_report = run_eval(queries, model, report=lambda msg: print(msg, file=sys.stderr))
+    eval_report = run_eval(
+        queries, model,
+        report=lambda msg: print(msg, file=sys.stderr),
+        debug_report=lambda msg: print(f"  [debug] {msg}", file=sys.stderr),
+    )
     print(format_report(eval_report))
     append_to_log(eval_report)
     print(f"\nLogged to {_LOG_PATH}")
@@ -192,4 +494,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--with-judge" in sys.argv:
+        sys.exit(main_with_judge())
     sys.exit(main())

@@ -7,13 +7,11 @@
 ---
 
 ## Current state
-- **ON HOLD:** real-hardware confirmation commands for Phase 6 and the
-  macOS/Linux Phase 8 builds were handed off (see D-047's commands),
-  but execution is paused at the user's request pending a separate
-  discussion of what's next. Nothing below this line should be treated
-  as confirmed until the user reports back with actual command output
-  -- do not mark Phase 6 or Phase 8 (macOS/Linux) as done based on
-  anything in this file alone.
+- **ON HOLD, updated with REAL first-hardware data:** the user ran the
+  Phase 6/8 confirmation commands on real Windows hardware. Results
+  below. Still not fully closed — corrected test queries and a real
+  bug fix are needed before re-running, and macOS/Linux still haven't
+  been genuinely tested on their own OS (see below).
 - **Active phase:** Phase 6 — now CODE-COMPLETE. All three planned
   modules exist and are wired: `citation_verifier.py` (previously
   confirmed working), and this session's new
@@ -778,6 +776,128 @@ log the actual measured footprint here once available.
 
 ---
 **Return to `/context.md` for next steps.**
+
+### Entry 034
+**Phase:** 6/8/10, second real-hardware run — real bugs found and fixed, real Phase 6 data obtained, two open findings need your input
+**Action taken:** user ran corrected queries plus `citation_accuracy_eval.py` for real. Results:
+
+1. **False-premise query — still didn't hit the pre-retrieval short-circuit, my fault again.** The Eiffel Tower query passed `domain_gate` this time (good), but the query itself was only 9 words with no router trigger words → fast path, not agentic → never reached `answerability_pre` (which only exists on the agentic path). It DID reach the fast path's post-retrieval answerability check, which correctly reasoned `"The Eiffel Tower did not collapse in 1990..."` — but assigned confidence below `CONFIDENCE_THRESHOLD` (0.6), so it was marked `ambiguous=True` rather than a clean refusal, and the pipeline proceeded to a full synthesis pass anyway (309.9s) before `output_rail` correctly caught the resulting citation-less answer and returned the safe fallback message. **Net effect was safe** (no false information ever surfaced) but expensive — a correct judgment that low self-reported confidence prevented from being acted on efficiently. Flagging this as a design tradeoff worth your awareness, not changing the ambiguous-threshold behavior unilaterally.
+2. **Self-consistency query — routed correctly this time, and surfaced a real bug (B-020).** Confirmed reaching the agentic path (`"Planning multi-step research"`), ran the full retry loop (3 attempts, correctly capped at `MAX_RETRIES=2`), and `self-consistency: checked=True` fired for real for the first time. But the flagged facts (`'1', '2024,', '5', 'IRENA', ...`) were mostly artifacts, not genuine inconsistency — see B-020 (debug.md) for full root cause and fix. **Two of the flagged facts (`IRENA`, `International Renewable Energy Agency`) look like plausible genuine signal** — worth confirming on the next real run now that the noise is fixed.
+3. **`citation_accuracy_eval.py` — produced the FIRST REAL Phase 6 exit-criteria number.** 11 verified / 15 unverified / 18 unchecked → **42.3% per-claim citation accuracy** across 11/12 completed queries. This is real, if concerning — genuinely low, and actionable (matches D-001's fine-tuning-reconsideration criteria: a specific, reproducible gap). Logged automatically to `docs/eval_log.md` by the harness itself.
+4. **`citation_accuracy_eval.py` query 12 crashed**: `Requested tokens (9381) exceed context window of 8192`. Caught gracefully by the harness's own per-query error handling (didn't kill the run, exactly as designed) — but this is a `FathomModel`/`JudgeModel`-level gap with NO guard anywhere in the codebase, meaning the same crash is a real risk in the PRODUCTION pipeline (`main.py`) for any real user whose query accumulates enough chunk content, not just in eval. **Not fixed yet — needs a deliberate design decision** (truncate chunk content? cap citation count per batched `citation_verifier` call? reduce `max_tokens` dynamically?), not a one-line patch. Flagging for your input rather than picking a strategy unilaterally.
+5. **5 of 12 eval queries came back with `verified=unverified=unchecked=0`** (a fully empty citations list) — including `"What year was the transistor invented?"` and the JWST query, both clearly legitimate, answerable questions. Cause unknown from the current output alone — could be `answerability_pre` incorrectly refusing (a false positive worth knowing about), a genuine zero-evidence retrieval, or something else entirely. **Added `debug_report` threading to `run_eval()`/`main()`** so the next real run will show per-query, per-node progress and make this diagnosable — this wasn't previously wired in.
+
+**Bugs fixed this run:** B-020 (self_consistency's fact-extraction noise — three compounding issues, see debug.md).
+**Files touched:** `src/core/state.py`, `src/rag/graph.py`,
+`src/verification/self_consistency.py`, `tests/eval/citation_accuracy_eval.py`
+(debug threading), plus test files.
+**Regression status:** 226/226 across the full 15-file suite.
+**Real Phase 6 data now on record:** 42.3% per-claim citation accuracy
+(`docs/eval_log.md`, first real entry). Low enough to be a genuine
+signal, not just a mechanism check anymore.
+**Two open findings genuinely need your input, not a unilateral fix:**
+- The n_ctx overflow crash (#4 above) — a real production robustness
+  gap, needs a truncation/token-budget strategy decision.
+- Whether to lower `CONFIDENCE_THRESHOLD` or otherwise let a
+  correctly-reasoned but low-confidence false-premise verdict act more
+  decisively (#1 above) — a real cost-vs-safety tradeoff, not an
+  obvious fix.
+**Next action for next session:** re-run `citation_accuracy_eval.py`
+with the new debug output to diagnose the 5 zero-citation queries;
+re-run the corrected self-consistency query to confirm B-020's fix
+against real output; discuss the two open findings above before acting
+on either.
+
+### Entry 033
+**Phase:** 6/8, first real-hardware run — mixed results, one real bug found (B-019)
+**Action taken:** user ran the confirmation commands from D-047 on
+real Windows hardware. Results:
+
+1. **False-premise test — inconclusive, bad test query.** The JWST
+   query got refused by `domain_gate.py` ("This tool is focused on
+   research questions only"), NOT by `answerability.py`. Pipeline order
+   is `domain_gate → router → answerability_pre` — the query never
+   reached the code under test. Not a confirmed pass OR fail for
+   `answerability_pre`; needs a query that clearly survives
+   `domain_gate` while still carrying a false premise.
+2. **Normal query — CONFIRMED WORKING.** Full pipeline ran correctly:
+   `answerability` check ran (`answerable=True`), 8 sources retrieved
+   across 4 tools, grounded and cited answer produced, sources listed
+   correctly. 193.2s for one deep-mode query (consistent with
+   D-022/D-029's known latency profile, not a new concern).
+3. **Self-consistency test — inconclusive, bad test query.** Query was
+   8 words with no comparison/multi-part language, so `router.py`'s
+   regex heuristic sent it to the FAST path — `--self-consistency` only
+   affects the agentic path (`run_agentic()`), so it had zero effect.
+   Confirmed by the debug output: no `Verifying citations` or
+   `self-consistency:` lines appeared at all, exactly what fast-path-only
+   execution would produce. `answerability_ambiguous` flag DID fire
+   correctly on the fast path, which is a real (if small) confirmation.
+4. **Full regression suite — CONFIRMED, parity with sandbox.** All 12
+   files (pre-Phase-10 test list) passed on real Windows hardware with
+   no failures, matching sandbox results exactly.
+5. **macOS/Linux builds — REVEALED A REAL BUG (B-019), not confirmed.**
+   `build_macos.py` and `build_linux.py`, run from Windows, silently
+   produced a genuine Windows `.exe` in folders named `dist/macos/` and
+   `dist/linux/`, with no error and output claiming success. Root
+   cause: no code ever checked the actual OS against the target label
+   — `decisions.md` D-005 documented the constraint, but nothing
+   enforced it. Fixed same-session: `build/_common.py` now hard-blocks
+   with `WrongPlatformError` before invoking PyInstaller at all, naming
+   the actual OS, the required OS, and D-005. New test:
+   `test_phase8_build_platform_guard.py` (6/6). **macOS and Linux are
+   still NOT built or tested** — this fix means the next attempt will
+   correctly refuse on Windows rather than silently mislead, but actual
+   macOS/Linux hardware is still required, unchanged.
+6. **`citation_accuracy_eval.py` — started running for real**, first
+   query (`"What year was the transistor invented?"`) began without
+   crashing. Output was not yet complete when captured.
+
+**Decisions/bugs logged this run:** B-019 (the real one). The two
+"inconclusive" test results are logged here as testing-methodology
+corrections, not code bugs — the underlying `answerability_pre` and
+`self_consistency` code paths remain UNTESTED on real hardware, not
+confirmed broken or confirmed working.
+**Regression status:** 220/220 across the full 14-file suite after the
+B-019 fix (12 pre-existing files independently re-confirmed on real
+Windows hardware by the user; all 14 re-confirmed in sandbox after the
+fix).
+**Corrected test queries for next real-hardware attempt:**
+- False-premise (needs to survive `domain_gate` first): try something
+  more clearly historical/factual in framing rather than近-future/
+  space-related, e.g. `"Why did the Eiffel Tower collapse in 1990?"` —
+  needs actual real-hardware confirmation it passes `domain_gate`
+  before reaching `answerability_pre`; not guaranteed, since
+  `domain_gate` is itself an LLM classifier with real variance.
+- Self-consistency (needs to hit the agentic path): `"Compare recent
+  renewable energy adoption statistics between the US and China --
+  what are the latest figures for each?"` — confirmed via
+  `router.classify_complexity()` to route "complex" (contains
+  "compare", multiple "?").
+- Run with the corrected `--self-consistency` command again and confirm
+  a `self-consistency:` debug line actually appears this time.
+**Next action for next session:** re-run the corrected queries #1 and
+#3, get the `citation_accuracy_eval.py` run's full output, and — once
+real macOS/Linux hardware is available — re-attempt those builds
+against the now-fixed guard.
+
+### Entry 032
+**Phase:** 10 code, built ahead of schedule at explicit user request
+(D-050) — Phase 6/8 still open, not being treated as "Phase 10 started"
+**Action taken:** implemented D-049's judge model: `tests/eval/
+judge_model.py` (JudgeModel, mirrors FathomModel's interface, kept
+strictly under `tests/eval/` so it can never end up in `build/`'s
+packaged output), and extended `citation_accuracy_eval.py` with
+`--with-judge` (sequential-loading two-phase run: Qwen generates +
+self-judges, gets explicitly freed from memory, then the judge
+independently re-checks the same citations). Reports and logs both
+models' accuracy plus their agreement rate — the disagreement signal is
+the actual point.
+**Decisions logged this run:** D-050.
+**Regression status:** 212/212 across the full 14-file suite.
+**Still open:** no real run — needs the actual GGUF downloaded (not
+possible from this sandbox) and real hardware. One more command added
+to the same "on hold" batch from Entry 030/031, not a new item.
 
 ### Entry 031
 **Phase:** 6, closing the metric-mechanism gap (D-048)

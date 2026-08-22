@@ -98,6 +98,9 @@ machine with nothing pre-installed, on all three OSes.
 ## Phase 10 — Evaluation, hardening, release prep
 **Files:** `tests/eval/golden_set.jsonl`, `tests/unit/*`
 **Goal:** full eval suite passing against `prd.md` success criteria.
+**Judge model:** a separate offline open-source model (Llama-3.1-8B-
+Instruct GGUF), not Qwen3-4B judging itself and not a hosted API — see
+`decisions.md` D-049.
 **Exit criteria:** metrics logged in `status.md`; `readme.md` finalized;
 tag v1.0.
 

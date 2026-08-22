@@ -72,6 +72,16 @@ result5 = sample_and_check("q", CHUNKS, "Founded in 1998.", model5, n_samples=1)
 check("n_samples < 2 -> checked=False", result5.checked is False)
 check("n_samples < 2 -> no model calls made", model5.call_count == 0)
 
+# --- B-020 (found on real hardware, D-050 follow-up): trailing
+# sentence punctuation must NOT get folded into a number, and citation
+# marker digits must NOT leak in as content facts ---
+check("B-020: trailing comma stripped from a year ('2024,' -> '2024')", "2024" in _extract_facts("...in 2024, the...") and "2024," not in _extract_facts("...in 2024, the..."))
+check("B-020: trailing period stripped from a number", "40" in _extract_facts("grew by 40. Next,") and "40." not in _extract_facts("grew by 40. Next,"))
+check("B-020: thousands-separator number still matches in full", "1,200" in _extract_facts("raised $1,200 total"))
+check("B-020: citation marker digit does not leak into facts", "5" not in _extract_facts("as shown [web:5]."))
+check("B-020: multi-index citation marker digits do not leak into facts", "2" not in _extract_facts("per [news:2,4] reports.") and "4" not in _extract_facts("per [news:2,4] reports."))
+check("B-020: genuine number right next to a citation tag still extracted", "2024" in _extract_facts("released in 2024 [web:0]."))
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

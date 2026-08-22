@@ -47,9 +47,31 @@ SAMPLE_TEMPERATURE = 0.7  # higher than synthesis's default 0.3,
 # after the %, meaning \b\d[\d,.]*%?\b would silently fail to match any
 # number with a percent sign at all. The leading \b is safe (a digit is
 # always \w, so it correctly anchors after whitespace/punctuation).
-_NUMBER_PATTERN = re.compile(r"\b\d[\d,.]*%?")
+#
+# The [\d,.]* run is wrapped as (?:[\d,.]*\d)? -- optional, but when
+# present it must END in a digit. Without this, "in 2024, the..." would
+# greedily consume the sentence-punctuation comma as part of the
+# number, producing "2024," as a "fact" instead of "2024" -- see B-020.
+# A genuine thousands-separator ("1,200") still matches in full, since
+# the trailing digit requirement is satisfied by the final "0", not by
+# excluding commas altogether.
+_NUMBER_PATTERN = re.compile(r"\b\d(?:[\d,.]*\d)?%?")
 _YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 _ENTITY_PATTERN = re.compile(r"\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3}\b")
+
+# Citation tags like "[web:5]" or "[news:0,1]" must be stripped BEFORE
+# fact extraction, not just left in -- otherwise _NUMBER_PATTERN's
+# leading \b matches the digit right after the colon (":" is \W, the
+# digit is \w, so there IS a boundary there), and citation INDEX
+# numbers get treated as content facts. Two samples citing the same
+# true claim from a different source, or in a different order, would
+# then get flagged as "inconsistent" purely because of which source
+# happened to end up as web:0 vs web:2 in that particular generation --
+# noise entirely unrelated to whether the claim itself is reliable.
+# Same pattern rag/synthesis.py's _CITATION_TAG_PATTERN uses, reused
+# here for consistency rather than redefined slightly differently. See
+# B-020.
+_CITATION_TAG_PATTERN = re.compile(r"\[([a-zA-Z0-9_:.,\s-]+)\]")
 
 
 def _extract_facts(text: str) -> set[str]:
@@ -59,7 +81,13 @@ def _extract_facts(text: str) -> set[str]:
     samples (e.g. "the study" vs "this research") is NOT what this
     check is for; numbers, dates, and named entities are the concrete,
     checkable claims code_logic.md §7 calls out.
+
+    Citation tags are stripped first -- see _CITATION_TAG_PATTERN's
+    comment (B-020): a citation INDEX (which source got cited as
+    web:0 vs web:2) is not a content fact, and including it produces
+    noise unrelated to whether the underlying claim is reliable.
     """
+    text = _CITATION_TAG_PATTERN.sub(" ", text)
     facts: set[str] = set()
     facts.update(_NUMBER_PATTERN.findall(text))
     facts.update(_YEAR_PATTERN.findall(text))

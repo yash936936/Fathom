@@ -442,5 +442,121 @@ correctly.
 and comma/decimal-containing numbers (e.g. "1,200" or "3.5") still match
 correctly, not just the percentage case that surfaced the bug.
 
+### B-019 — `build_macos.py`/`build_linux.py` silently produced a mislabeled Windows `.exe` when run on Windows
+**Phase:** 8, caught on REAL hardware (the user's actual Windows
+machine) — first real-hardware bug this project has found, not a
+sandbox/stub-model artifact
+**Symptom:** user ran `py build/build_macos.py` and `py
+build/build_linux.py` from a Windows machine (following this session's
+own testing instructions). Both completed "successfully," with build
+logs explicitly showing `Platform: Windows-11-...` and a Windows
+bootloader (`Bootloader ...\Windows-64bit-intel\run.exe`), producing a
+real `fathom.exe` — but placed in folders named `dist/macos/fathom/`
+and `dist/linux/fathom/`, with the tool's own printed output claiming
+"Build complete" and listing an "Executable" path with no `.exe`
+extension, as if a genuine macOS/Linux binary had been produced.
+Neither script's docstring warning ("MUST be run ON macOS/Linux") was
+enforced anywhere in code.
+**Root cause:** `build/_common.py`'s `run_pyinstaller(os_name)` never
+checked the actual running OS against `os_name` before invoking
+PyInstaller — decisions.md D-005 documented that PyInstaller can't
+cross-compile, but nothing in the CODE acted on that fact. A second,
+related bug in the same function: the executable's filename
+(`fathom.exe` vs `fathom`) was derived from the `os_name` LABEL
+argument, not from the actual OS — so even the printed path was wrong
+for what PyInstaller had actually produced (a real `.exe`, described as
+extension-less `fathom`).
+**Fix:** added a hard platform guard at the top of `run_pyinstaller()`
+— compares `platform.system()` against the OS the label implies
+(`windows`→`Windows`, `macos`→`Darwin`, `linux`→`Linux`) and raises
+`WrongPlatformError` with a specific, actionable message BEFORE
+PyInstaller is ever invoked, referencing this exact failure mode.
+`exe_name`'s extension logic changed to derive from the actual OS
+(`platform.system()`), not the label — defense in depth, since the new
+guard means label and actual OS can no longer disagree by the time that
+line runs, but the bug here was specifically trusting the label over
+reality, so it shouldn't do that anywhere in this function.
+**Files touched:** `build/_common.py`, `test_phase8_build_platform_
+guard.py` (new).
+**Verification:** new test confirms `WrongPlatformError` is raised for
+every non-matching OS label, before `subprocess.run()` would ever be
+reached, with the error message naming both the actual OS, the OS that
+was required, and `decisions.md` D-005. 6/6 passing. 220/220 across the
+full regression suite (unchanged from before this fix — this bug's fix
+doesn't touch any query-processing code).
+**Real-world impact if unfixed:** someone could have shipped a Windows
+`.exe` believing it was a real macOS or Linux build, since the tool's
+own output actively claimed success for the wrong platform. This is
+exactly the kind of gap Phase 8's exit criteria ("tested on all three
+target OSes") exists to catch — caught here specifically because a
+real Windows machine actually ran these scripts and their output was
+read closely, not assumed correct.
+
+### B-020 — `self_consistency.py` flagged Fathom's own injected notes, and citation-marker digits, as "inconsistent facts"
+**Phase:** 6, caught on the SECOND real-hardware run (the corrected
+`--self-consistency` query from Entry 033 actually reached agentic code
+this time, which is what surfaced this)
+**Symptom:** real debug output showed `self-consistency: checked=True
+flagged=['1', '2024,', '5', 'IRENA', 'International Renewable Energy
+Agency', 'Note', 'Specifically']`. Two of the flagged tokens ('IRENA',
+'International Renewable Energy Agency') look like plausible genuine
+signal; the rest are artifacts, not real inconsistency.
+**Root cause, three compounding issues:**
+1. `verification_node` called `self_consistency.sample_and_check()`
+   with `state["answer"]` AFTER both the post-retrieval answerability
+   caveat and the citation-verification caveat had already been
+   appended to it, AND `synthesis_node` itself appends a
+   sufficiency-gap note ("...Specifically missing: {gap}") before
+   `state["answer"]` is even set. None of these three injected notes
+   are reproduced by `sample_and_check()`'s own resamples (they call
+   `rag.synthesis.generate()` directly, with none of Fathom's own
+   post-processing) -- so words from Fathom's OWN caveats ("Note",
+   "Specifically") were guaranteed to never match across samples,
+   regardless of the model's actual consistency.
+2. `_NUMBER_PATTERN`'s `[\d,.]*` character class allowed a trailing
+   comma or period with nothing requiring the match to END in a digit
+   -- "in 2024, the..." matched "2024," (comma included) instead of
+   "2024", so two samples with identical content but different
+   surrounding punctuation would mismatch on pure formatting.
+3. `_NUMBER_PATTERN`'s leading `\b` matches the digit boundary right
+   after a citation tag's colon (`:` is `\W`, the digit is `\w`), so
+   citation INDEX numbers like the "5" in `[web:5]` were extracted as
+   content facts -- meaning which source happened to get cited as
+   `web:0` vs `web:2` in a given generation (an arbitrary artifact of
+   that run, not a claim about reliability) could itself trigger a
+   flag.
+**Fix:**
+1. Added `raw_synthesized_answer` to `ResearchState` -- `synthesis_node`
+   now captures the UNMUTATED `generate()` output before appending its
+   own gap note; `verification_node`'s self-consistency call uses
+   `state.get("raw_synthesized_answer", state["answer"])` instead of
+   the progressively-mutated `state["answer"]`.
+2. `_NUMBER_PATTERN` changed from `\b\d[\d,.]*%?` to
+   `\b\d(?:[\d,.]*\d)?%?` -- the digit/comma/period run is now optional
+   but must end in a digit when present, so trailing punctuation is
+   excluded while genuine thousands-separator numbers ("1,200") still
+   match in full.
+3. Citation tags are now stripped (via the same pattern
+   `rag/synthesis.py`'s `_CITATION_TAG_PATTERN` uses) BEFORE fact
+   extraction runs, so citation indices can never leak in as content
+   facts.
+**Files touched:** `src/core/state.py`, `src/rag/graph.py`,
+`src/verification/self_consistency.py`, `test_phase6_self_
+consistency.py` (+6 checks against the exact real-world patterns),
+`test_phase6_graph_wiring.py` (+3 checks, reproducing the exact
+real-hardware scenario: exhausted retries + unverified citation, both
+injecting notes, confirming an identical resample now correctly
+produces zero false flags despite both notes being present in
+`state["answer"]`).
+**Verification:** 226/226 across the full 15-file regression suite. The
+exact real-world text pattern from the actual debug output
+(`"International Renewable Energy Agency (IRENA) reported in 2024,
+capacity reached [web:5] and [web:2]."`) manually re-verified to now
+extract only `{'2024', 'IRENA', 'International Renewable Energy
+Agency'}` -- no trailing comma, no citation-marker digits.
+**Not yet re-confirmed on real hardware** -- same standing gap as
+everything else; this fix is sandbox-verified against the exact
+real-world failure pattern, not yet re-run for real.
+
 ---
 **Return to `/context.md` for next steps.**

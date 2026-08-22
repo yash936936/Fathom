@@ -73,6 +73,13 @@ class ResearchState(TypedDict, total=False):
     # -- synthesis (rag/synthesis.py) --
     answer: str
     citations: list[Citation]
+    raw_synthesized_answer: str  # the UNMUTATED output of
+    # rag.synthesis.generate(), before synthesis_node's own
+    # sufficiency-gap note or any of verification_node's caveats are
+    # appended to `answer`. Exists so
+    # verification/self_consistency.py compares each resample against
+    # what synthesis actually produced, not against `answer` after
+    # Fathom's own injected notes have been glued onto it -- see B-020.
 
     # -- verification (verification/*) --
     answerable: bool

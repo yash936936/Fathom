@@ -164,6 +164,13 @@ def build_graph(
         answer, citations = generate(
             state["original_query"], chunks, model, conversation_context=conversation_context
         )
+        # Captured BEFORE the sufficiency-gap note below, and before
+        # verification_node appends any of its own caveats -- see B-020.
+        # self_consistency.sample_and_check() needs to compare each
+        # resample against exactly this, since its own resamples never
+        # include either kind of appended note (generate() doesn't add
+        # them, and the resamples never pass through verification_node).
+        state["raw_synthesized_answer"] = answer
 
         gap = state.get("sufficiency_gap")
         if gap and not state.get("sufficiency", True):
@@ -233,8 +240,21 @@ def build_graph(
         # module docstring and D-045 for the real-hardware-latency caveat.
         if enable_self_consistency:
             report("Cross-checking answer consistency")
+            # Use raw_synthesized_answer, NOT state["answer"] -- by this
+            # point state["answer"] may already carry the sufficiency-gap
+            # note (synthesis_node) and/or the answerability/citation
+            # caveats appended just above in THIS function. None of
+            # those ever appear in the fresh resamples
+            # sample_and_check() generates (they come straight from
+            # rag.synthesis.generate(), with none of Fathom's own
+            # post-processing), so comparing against the mutated
+            # `answer` guarantees spurious mismatches on Fathom's own
+            # injected text ("Note", "Specifically", etc.) that have
+            # nothing to do with the model's actual consistency. See
+            # B-020.
+            raw_answer = state.get("raw_synthesized_answer", state["answer"])
             consistency = self_consistency.sample_and_check(
-                state["original_query"], chunks, state["answer"], model
+                state["original_query"], chunks, raw_answer, model
             )
             if debug_report:
                 debug_report(

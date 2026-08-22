@@ -116,6 +116,51 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
     check("enable_self_consistency=False -- no extra resample call, exactly 6 calls", len(model4.call_log) == 6)
     check("no self-consistency flag when disabled", not any("self_consistency_flagged" in f for f in final_state4.get("guardrail_flags", [])))
 
+# --- Test 5 (B-020, found on real hardware): self-consistency must
+# compare against the RAW synthesized answer, not state["answer"]
+# after synthesis_node's sufficiency-gap note and verification_node's
+# own caveats have been appended to it -- otherwise every run with an
+# insufficient-evidence gap note or an unverified citation would get
+# spuriously flagged on Fathom's OWN injected text ("Note",
+# "Specifically"), never on genuine model inconsistency. ---
+with patch("rag.graph.retrieve", side_effect=fake_retrieve):
+    from rag.graph import run_agentic as run_agentic_5
+
+    model5 = StubModel(
+        [
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability_pre
+            '{"sub_queries": ["q"], "requires_recency": false}',  # planner
+            # sufficiency: insufficient on every attempt, exhausting
+            # MAX_RETRIES=2 so synthesis_node's gap note fires --
+            # exactly the real-hardware condition that surfaced B-020.
+            '{"sufficient": false, "gap": "missing recent data", "search_query": "more recent data"}',
+            '{"sufficient": false, "gap": "missing recent data", "search_query": "more recent data"}',
+            '{"sufficient": false, "gap": "missing recent data", "search_query": "more recent data"}',
+            "Founded in 1998 by Jane Smith [web:0].",  # synthesis (raw)
+            '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability post-check
+            '[{"index": 0, "supported": false}]',  # citation verification -- UNVERIFIED,
+            # so verification_node also appends its own caveat to
+            # state["answer"] -- a second source of injected text.
+            "Founded in 1998 by Jane Smith [web:0].",  # self-consistency resample --
+            # IDENTICAL to the raw synthesized answer, so a correctly-
+            # scoped comparison must find zero divergence.
+        ]
+    )
+    final_state5 = run_agentic_5("when was it founded", model5, enable_self_consistency=True)
+    check(
+        "B-020: state['answer'] does carry both injected notes (sanity check the setup)",
+        "Specifically missing" in final_state5.get("answer", "") and "could not be confirmed" in final_state5.get("answer", ""),
+    )
+    check(
+        "B-020: raw_synthesized_answer does NOT carry either injected note",
+        "Specifically missing" not in final_state5.get("raw_synthesized_answer", "")
+        and "could not be confirmed" not in final_state5.get("raw_synthesized_answer", ""),
+    )
+    check(
+        "B-020: identical raw answer + resample -> NO false self-consistency flag despite both injected notes being present in state['answer']",
+        not any("self_consistency_flagged" in f for f in final_state5.get("guardrail_flags", [])),
+    )
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

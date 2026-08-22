@@ -93,7 +93,12 @@
   groundedness score, refusal correctness on off-domain set, retrieval
   sufficiency-loop retry rate, latency percentiles.
 - Tooling: Ragas/Langfuse-style scoring, self-consistency sampling on the
-  agentic path only (cost-gated — see `decisions.md` D-006).
+  agentic path only (cost-gated — see `decisions.md` D-006). Judge
+  model: a separate offline open-source model (Llama-3.1-8B-Instruct,
+  GGUF, Q4_K_M), NOT Qwen3-4B and NOT a hosted API — see `decisions.md`
+  D-049 for the self-judging/hosted-API tradeoff this resolves. Loaded
+  sequentially with the generator at eval time, never concurrently, to
+  stay within the same <6GB-class hardware budget.
 
 ## 8. Explicitly excluded from v1 architecture
 - LLM gateway / multi-tenant serving layer (CLI runs in-process).

@@ -1543,5 +1543,120 @@ phase6_citation_queries.jsonl` (new, 12 queries), `docs/eval_log.md`
 exit criteria, not the DATA gap; both were real, and only the first is
 fixed here.
 
+### D-049 — Judge model for Phase 10 eval: separate offline open-source model, NOT Qwen3-4B, NOT a hosted API
+**Phase:** 10 (design decision only — logged ahead of implementation
+per the same precedent as D-001 anticipating Phase 6; NOT started as
+code, since `phases.md`'s ordering rule means Phase 10 shouldn't be
+built until Phase 6/8 close, and both are still open per status.md
+Entry 030/031's "on hold" state)
+**Finding/Decision:** discussed three options for Phase 10's offline
+eval judge (`trd.md` §7's "Ragas/Langfuse-style scoring"): (1) reuse
+Qwen3-4B itself, (2) a hosted API judge (GPT-4/Claude-class), (3) a
+separate offline open-source model. User chose (3), explicitly ruling
+out both self-judging and any hosted API dependency.
+
+**Why not Qwen3-4B as its own judge:** self-preference bias and
+correlated blind spots are well-documented failure modes when a
+model judges its own output -- here that risk is maximal, not just
+"same family," since generator and judge would be the literal same
+weights. A systematic weakness in Qwen3-4B (e.g. subtle numeric or
+date handling) would affect both the answer AND the judgment of that
+answer identically, since the same limitation produces both. This
+exact risk already exists at RUNTIME in `citation_verifier.py`
+(D-006/D-032) -- an accepted tradeoff there because the alternative
+was a hosted API in the shipped product, which `trd.md` §8 explicitly
+excludes from v1. Phase 10's eval doesn't ship to end users, so that
+constraint doesn't force the same tradeoff here.
+
+**Why not a hosted API:** ruled out explicitly by the user. Would
+have been the literature's more common choice (Ragas etc. typically
+assume a frontier hosted judge), but introduces a first-ever external
+API dependency into a codebase that currently has none, plus ongoing
+cost, key management, and a risk of the judge silently changing
+behavior on a provider-side model update between eval runs months
+apart.
+
+**Chosen: Llama-3.1-8B-Instruct, GGUF, Q4_K_M quant (~4.9GB).**
+- Different training lineage from Qwen (Meta vs. Alibaba) -- this
+  matters more for reducing self-preference/correlated-bias risk than
+  raw size alone; two same-family models can share blind spots even
+  at different scales.
+- Fits the user's stated constraint (same <6GB-class machine Fathom's
+  own model runs on) -- loaded SEQUENTIALLY at eval time (generate
+  with Qwen3-4B, unload, load the judge to score), never concurrently,
+  so peak memory never exceeds what one model alone needs.
+- Zero new infra: same `llama-cpp-python` + `core/llm_backend.py`
+  loading pattern already in the codebase for Qwen3-4B. No new
+  dependency, no API keys to keep out of `build/`'s packaged output.
+- 8B vs. 4B gives real headroom specifically for judgment tasks
+  (entailment, subtle factual drift) that benefit more from capacity
+  than generation does.
+
+**Not yet decided / explicitly deferred:** exact quantization variant
+beyond Q4_K_M, download/checksum mechanism for the judge model (likely
+reuses whatever `installer_support/model_downloader.py` builds for
+Phase 9, once that exists), and how `citation_accuracy_eval.py`
+(D-048) gets extended to optionally score with this judge alongside
+or instead of `citation_verifier.py`'s existing self-judged verdicts.
+None of this is implemented -- this entry exists so the decision isn't
+re-litigated when Phase 10 actually starts.
+**Files touched:** none (design-only).
+**Verification:** N/A -- no code to verify yet.
+**Still open:** Phase 6 and Phase 8 still need to close before any of
+this gets built, per `phases.md`'s ordering rule -- this decision is
+ready to implement the moment they do, not a signal to start now.
+
+### D-050 — D-049 implemented ahead of schedule, at explicit user request; ordering-rule exception, not a repeal
+**Phase:** 10 code, written while Phase 6/8 are still open
+**Finding/Decision:** D-049 said explicitly "this decision is ready to
+implement the moment they do, not a signal to start now." The user
+then asked directly for the code and runnable commands anyway. This is
+logged as a deliberate, explicit exception made at the project owner's
+request -- not a quiet reversal of `phases.md`'s ordering rule, and not
+a precedent for skipping it again without being asked. Phase 6 and
+Phase 8 are STILL open; nothing about writing this code changes that,
+and this code does not get treated as "Phase 10 is now underway" for
+scheduling purposes.
+
+**Built:**
+- `tests/eval/judge_model.py` — `JudgeModel`, mirroring
+  `core/llm_backend.FathomModel`'s `chat()` signature exactly (so it's
+  a drop-in for anywhere a `FathomModel` is accepted, specifically
+  `citation_verifier.verify_citations()`, without touching that
+  function at all). Deliberately kept under `tests/eval/`, never
+  imported from anything under `src/` -- this must never end up bundled
+  into `build/`'s PyInstaller output (Phase 8). Separate model
+  directory (`~/.fathom/eval-judge-models/`) and separate env var
+  (`FATHOM_JUDGE_MODEL_PATH`) from the production model, so the two can
+  never collide or be mistaken for each other.
+- `tests/eval/citation_accuracy_eval.py` extended with
+  `run_eval_with_judge()` (both models pre-loaded, for testing) and
+  `main_with_judge()` (the real CLI path: loads Qwen3-4B, runs every
+  query, explicitly `del`s it + `gc.collect()`s, THEN loads the judge —
+  never both resident at once, per D-049's stated hardware constraint).
+  New `--with-judge` CLI flag. Re-checks the SAME (claim, source_id)
+  pairs Qwen already judged, independently, by resetting `verified` to
+  `None` and re-running `verify_citations()` with the judge in place of
+  Qwen — reuses `citation_verifier.py` completely unchanged. Reports
+  and logs (to `docs/eval_log.md`, a new dated section distinct from
+  the single-judge entries) both models' independent accuracy AND the
+  agreement rate between them — the disagreement signal is the actual
+  point of D-049, not just a second accuracy number.
+- `test_phase10_judge_comparison.py` — sandbox validation with two
+  independent stub models, including the specific case that matters
+  most: Qwen says "supported", judge says "not supported" — confirms
+  the disagreement is correctly counted and surfaced, not silently
+  averaged away.
+**Files touched:** `tests/eval/judge_model.py` (new), `tests/eval/
+citation_accuracy_eval.py`, `docs/eval_log.md`, `test_phase10_
+judge_comparison.py` (new).
+**Verification:** 212/212 across the full 14-file regression suite.
+**Still not done, same as everything else in this thread:** no real
+run. Requires downloading the actual Llama-3.1-8B-Instruct GGUF (not
+done here — no network access to Hugging Face from this sandbox) and
+running on real hardware. Folds into the same real-hardware batch
+already on hold per Entry 030/031 — this adds one more command to that
+list, not a new separate ask.
+
 ---
 **Return to `/context.md` for next steps.**
