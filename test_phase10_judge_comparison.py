@@ -85,6 +85,46 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve):
     formatted = format_judge_comparison(comparison1)
     check("format_judge_comparison includes both models' accuracy labels", "Qwen3-4B" in formatted and "Llama-3.1-8B" in formatted)
 
+    # --- Test 5 (found on real hardware): Qwen's OWN citation_verifier
+    # call fails to parse (leaves citations unchecked, per
+    # citation_verifier.py's fail-open design), while the judge,
+    # re-checking the SAME citations, succeeds. This must show up as
+    # qwen_unchecked > 0 with agree=disagree=0 (an unresolved verdict on
+    # either side isn't a comparable (dis)agreement) -- NOT as a bug in
+    # the citation count. ---
+    qwen_model5 = StubModel(
+        PIPELINE_REPLIES + ["this is not valid JSON at all, citation_verifier fails to parse it"]
+    )
+    judge_model5 = StubModel(['[{"index": 0, "supported": true}]'])
+    comparison5 = run_eval_with_judge(["when was the transistor invented"], qwen_model5, judge_model5)
+    r5 = comparison5.results[0]
+    check("B-021 follow-up: Qwen's parse failure leaves the citation unchecked, not verified/unverified", r5.qwen_verified == 0 and r5.qwen_unverified == 0 and r5.qwen_unchecked == 1)
+    check("B-021 follow-up: judge independently resolves the same citation despite Qwen's failure", r5.judge_verified == 1 and r5.judge_unchecked == 0)
+    check("B-021 follow-up: no agreement or disagreement counted when Qwen's side is unchecked", r5.agreements == 0 and r5.disagreements == 0)
+    formatted5 = format_judge_comparison(comparison5)
+    check("B-021 follow-up: unchecked counts are visible in the formatted report, not hidden", "unchecked=1" in formatted5 and "unchecked=0" in formatted5)
+    check("B-021 follow-up: report calls out the Qwen-unchecked gap explicitly, not silently", "left 1 citation" in formatted5)
+
+    # --- Test 6 (D-051 follow-up, from real-hardware analysis): the
+    # report must surface disagreement CONCENTRATION, not just an
+    # aggregate rate -- and must label which side was more lenient,
+    # since "Qwen more lenient than the judge" is the self-preference-
+    # bias signal D-049 specifically exists to catch. ---
+    qwen_lenient = StubModel(
+        PIPELINE_REPLIES + ['[{"index": 0, "supported": true}]']
+    )
+    judge_strict = StubModel(['[{"index": 0, "supported": false}]'])
+    comparison6 = run_eval_with_judge(["transistor invention lenient test"], qwen_lenient, judge_strict)
+    check("disagreeing_queries property finds the one disagreeing query", len(comparison6.disagreeing_queries) == 1)
+    formatted6 = format_judge_comparison(comparison6)
+    check("report labels the lenient side explicitly", "Qwen more lenient" in formatted6)
+    check("report includes a 'Disagreement concentration' section when there's disagreement", "Disagreement concentration" in formatted6)
+
+    # A report with ZERO disagreement should NOT show the concentration
+    # section at all -- it would be noise for the common case.
+    formatted1 = format_judge_comparison(comparison1)
+    check("no disagreement -> no 'Disagreement concentration' section printed", "Disagreement concentration" not in formatted1)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

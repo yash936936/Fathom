@@ -203,8 +203,15 @@ class JudgeComparisonResult:
     query: str
     qwen_verified: int
     qwen_unverified: int
+    qwen_unchecked: int  # added after a real-hardware run (D-050
+    # follow-up) where qwen(v=7,u=2) vs judge(v=5,u=5) looked like a
+    # citation-count mismatch (9 vs 10) with no way to tell from the
+    # printed output alone whether that was a bug or just an unchecked
+    # citation on Qwen's side that the judge then resolved -- it was
+    # the latter, but the report couldn't prove it. See status.md.
     judge_verified: int
     judge_unverified: int
+    judge_unchecked: int
     agreements: int
     disagreements: int
     error: str | None = None
@@ -240,6 +247,53 @@ class JudgeComparisonReport:
         v = sum(r.judge_verified for r in self.results if r.error is None)
         u = sum(r.judge_unverified for r in self.results if r.error is None)
         return v / (v + u) if (v + u) else None
+
+    @property
+    def disagreeing_queries(self) -> list[JudgeComparisonResult]:
+        """Queries with at least one disagreement, sorted by
+        disagreement count descending. Added after the first real run
+        (D-051 follow-up): the aggregate agreement rate (73.1% in that
+        run) reads as evenly-distributed uncertainty, but the real
+        per-query data showed ALL disagreements concentrated in just 2
+        of 12 queries -- every other query with a real comparison
+        agreed 100%. That distinction is the actionable part, and the
+        aggregate number alone hides it completely.
+        """
+        return sorted(
+            (r for r in self.results if r.error is None and r.disagreements > 0),
+            key=lambda r: r.disagreements, reverse=True,
+        )
+
+    @property
+    def qwen_only_zero_queries(self) -> list[JudgeComparisonResult]:
+        """Queries where Qwen's own citation_verifier call produced
+        zero checked citations (v=0, u=0) but left at least one
+        unchecked (qwen_unchecked > 0) AND the judge found real
+        verdicts on the same citations -- i.e. NOT a case of zero
+        citations existing at all (that would show qwen_unchecked == 0
+        too), specifically a Qwen-side parse failure the judge
+        resolved. See D-051's finding about Qwen3-4B's structured-
+        output reliability on this task.
+        """
+        return [
+            r for r in self.results
+            if r.error is None and r.qwen_verified == 0 and r.qwen_unverified == 0
+            and r.qwen_unchecked > 0 and (r.judge_verified + r.judge_unverified) > 0
+        ]
+
+    @property
+    def perfect_agreement_all_unsupported_queries(self) -> list[JudgeComparisonResult]:
+        """Queries where both models agree, but agree everything is
+        UNSUPPORTED (qwen_verified == judge_verified == 0 with real
+        unverified counts on both sides). This is a RETRIEVAL/grounding
+        quality signal, not a judge-reliability signal -- both models
+        agreeing the sourcing is bad is a different finding than the
+        two models disagreeing with each other."""
+        return [
+            r for r in self.results
+            if r.error is None and r.qwen_verified == 0 and r.judge_verified == 0
+            and r.qwen_unverified > 0 and r.judge_unverified > 0
+        ]
 
 
 def run_eval_with_judge(
@@ -278,15 +332,16 @@ def run_eval_with_judge(
             final_state = run_agentic(query, model, top_k=top_k, enable_self_consistency=False)
             chunks = final_state.get("retrieved_chunks", [])
             qwen_citations = final_state.get("citations", [])
-            qwen_verified, qwen_unverified, _ = summarize(qwen_citations)
+            qwen_verified, qwen_unverified, qwen_unchecked = summarize(qwen_citations)
 
             # Independent re-check: reset verified to None so
             # verify_citations() treats every citation as unchecked,
             # exactly as it would on a fresh run -- otherwise it would
             # skip everything, since Qwen already resolved them.
             judge_input = [{**c, "verified": None} for c in qwen_citations]
+            judge_input = [{**c, "verified": None} for c in qwen_citations]
             judge_citations = verify_citations(judge_input, chunks, judge_model)
-            judge_verified, judge_unverified, _ = summarize(judge_citations)
+            judge_verified, judge_unverified, judge_unchecked = summarize(judge_citations)
 
             agreements = 0
             disagreements = 0
@@ -305,15 +360,17 @@ def run_eval_with_judge(
             comparison.results.append(
                 JudgeComparisonResult(
                     query=query, qwen_verified=qwen_verified, qwen_unverified=qwen_unverified,
-                    judge_verified=judge_verified, judge_unverified=judge_unverified,
+                    qwen_unchecked=qwen_unchecked, judge_verified=judge_verified,
+                    judge_unverified=judge_unverified, judge_unchecked=judge_unchecked,
                     agreements=agreements, disagreements=disagreements,
                 )
             )
         except Exception as exc:  # noqa: BLE001 -- same reasoning as run_eval()
             comparison.results.append(
                 JudgeComparisonResult(
-                    query=query, qwen_verified=0, qwen_unverified=0, judge_verified=0,
-                    judge_unverified=0, agreements=0, disagreements=0, error=str(exc),
+                    query=query, qwen_verified=0, qwen_unverified=0, qwen_unchecked=0,
+                    judge_verified=0, judge_unverified=0, judge_unchecked=0,
+                    agreements=0, disagreements=0, error=str(exc),
                 )
             )
     return comparison
@@ -326,8 +383,8 @@ def format_judge_comparison(comparison: JudgeComparisonReport) -> str:
             lines.append(f"  ERROR  {r.query!r}: {r.error}")
         else:
             lines.append(
-                f"  qwen(v={r.qwen_verified},u={r.qwen_unverified}) "
-                f"judge(v={r.judge_verified},u={r.judge_unverified}) "
+                f"  qwen(v={r.qwen_verified},u={r.qwen_unverified},unchecked={r.qwen_unchecked}) "
+                f"judge(v={r.judge_verified},u={r.judge_unverified},unchecked={r.judge_unchecked}) "
                 f"agree={r.agreements} disagree={r.disagreements}  {r.query!r}"
             )
     lines.append("")
@@ -337,6 +394,63 @@ def format_judge_comparison(comparison: JudgeComparisonReport) -> str:
     lines.append(f"Qwen3-4B self-judged accuracy:  {f'{qa:.1%}' if qa is not None else 'N/A'}")
     lines.append(f"Llama-3.1-8B judge accuracy:    {f'{ja:.1%}' if ja is not None else 'N/A'}")
     lines.append(f"Agreement rate:                 {f'{ar:.1%}' if ar is not None else 'N/A'}")
+    total_qwen_unchecked = sum(r.qwen_unchecked for r in comparison.results if r.error is None)
+    if total_qwen_unchecked:
+        lines.append(
+            f"NOTE: Qwen's own citation_verifier call left {total_qwen_unchecked} "
+            f"citation(s) unchecked across this run (parse failure -- "
+            f"verify_citations() fails open rather than guessing, per "
+            f"citation_verifier.py's own docstring). Those unchecked "
+            f"citations are excluded from Qwen's own accuracy figure "
+            f"above but WERE independently resolved by the judge where "
+            f"possible -- a gap this size between the two models' "
+            f"unchecked counts is itself a reliability signal worth "
+            f"tracking over time, not just noise."
+        )
+
+    # Disagreement concentration -- the aggregate agreement rate alone
+    # can read as "uncertainty spread evenly across queries" when the
+    # real pattern is a handful of queries accounting for ALL the
+    # disagreement and everything else agreeing perfectly. That
+    # distinction is the actionable part; see D-051 follow-up.
+    disagreeing = comparison.disagreeing_queries
+    if disagreeing:
+        lines.append("")
+        lines.append(
+            f"Disagreement concentration: {len(disagreeing)}/"
+            f"{sum(1 for r in comparison.results if r.error is None)} queries "
+            f"account for all {comparison.total_disagreements} disagreement(s):"
+        )
+        for r in disagreeing:
+            lean = "Qwen more lenient" if r.qwen_verified > r.judge_verified else (
+                "judge more lenient" if r.judge_verified > r.qwen_verified else "mixed"
+            )
+            lines.append(
+                f"  {r.query!r}: qwen(v={r.qwen_verified},u={r.qwen_unverified}) "
+                f"judge(v={r.judge_verified},u={r.judge_unverified}) -- {lean}"
+            )
+
+    qwen_only_zero = comparison.qwen_only_zero_queries
+    if qwen_only_zero:
+        lines.append("")
+        lines.append(
+            f"Qwen-side parse failures, resolved by the judge "
+            f"({len(qwen_only_zero)} quer{'y' if len(qwen_only_zero) == 1 else 'ies'}):"
+        )
+        for r in qwen_only_zero:
+            lines.append(f"  {r.query!r}")
+
+    all_unsupported = comparison.perfect_agreement_all_unsupported_queries
+    if all_unsupported:
+        lines.append("")
+        lines.append(
+            f"Both models agree citations are unsupported (retrieval/"
+            f"grounding signal, not a judge-disagreement signal) "
+            f"({len(all_unsupported)} quer{'y' if len(all_unsupported) == 1 else 'ies'}):"
+        )
+        for r in all_unsupported:
+            lines.append(f"  {r.query!r}")
+
     return "\n".join(lines)
 
 
@@ -347,13 +461,17 @@ def append_judge_comparison_to_log(comparison: JudgeComparisonReport, hardware_n
     live in one place, per D-049."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     qa, ja, ar = comparison.qwen_accuracy, comparison.judge_accuracy, comparison.agreement_rate
+    total_qwen_unchecked = sum(r.qwen_unchecked for r in comparison.results if r.error is None)
+    total_judge_unchecked = sum(r.judge_unchecked for r in comparison.results if r.error is None)
     entry = (
         f"\n### {timestamp} (Qwen vs. Llama-3.1-8B judge comparison, D-049)\n"
         f"**Hardware:** {hardware_note}\n"
         f"**Queries run:** {len(comparison.results)} "
         f"({sum(1 for r in comparison.results if r.error)} errored)\n"
-        f"**Qwen3-4B self-judged accuracy:** {f'{qa:.1%}' if qa is not None else 'N/A'}\n"
-        f"**Llama-3.1-8B judge accuracy:** {f'{ja:.1%}' if ja is not None else 'N/A'}\n"
+        f"**Qwen3-4B self-judged accuracy:** {f'{qa:.1%}' if qa is not None else 'N/A'} "
+        f"({total_qwen_unchecked} citation(s) left unchecked by Qwen's own call)\n"
+        f"**Llama-3.1-8B judge accuracy:** {f'{ja:.1%}' if ja is not None else 'N/A'} "
+        f"({total_judge_unchecked} citation(s) left unchecked by the judge)\n"
         f"**Agreement rate:** {f'{ar:.1%}' if ar is not None else 'N/A'} "
         f"({comparison.total_agreements} agree / {comparison.total_disagreements} disagree)\n"
     )
@@ -432,16 +550,17 @@ def main_with_judge() -> int:
         if r["error"] is not None:
             comparison.results.append(
                 JudgeComparisonResult(
-                    query=r["query"], qwen_verified=0, qwen_unverified=0, judge_verified=0,
-                    judge_unverified=0, agreements=0, disagreements=0, error=r["error"],
+                    query=r["query"], qwen_verified=0, qwen_unverified=0, qwen_unchecked=0,
+                    judge_verified=0, judge_unverified=0, judge_unchecked=0,
+                    agreements=0, disagreements=0, error=r["error"],
                 )
             )
             continue
         try:
-            qwen_verified, qwen_unverified, _ = _summarize(r["citations"])
+            qwen_verified, qwen_unverified, qwen_unchecked = _summarize(r["citations"])
             judge_input = [{**c, "verified": None} for c in r["citations"]]
             judge_citations = verify_citations(judge_input, r["chunks"], judge_model)
-            judge_verified, judge_unverified, _ = _summarize(judge_citations)
+            judge_verified, judge_unverified, judge_unchecked = _summarize(judge_citations)
 
             agreements = disagreements = 0
             for qc, jc in zip(r["citations"], judge_citations):
@@ -454,15 +573,17 @@ def main_with_judge() -> int:
             comparison.results.append(
                 JudgeComparisonResult(
                     query=r["query"], qwen_verified=qwen_verified, qwen_unverified=qwen_unverified,
-                    judge_verified=judge_verified, judge_unverified=judge_unverified,
+                    qwen_unchecked=qwen_unchecked, judge_verified=judge_verified,
+                    judge_unverified=judge_unverified, judge_unchecked=judge_unchecked,
                     agreements=agreements, disagreements=disagreements,
                 )
             )
         except Exception as exc:  # noqa: BLE001
             comparison.results.append(
                 JudgeComparisonResult(
-                    query=r["query"], qwen_verified=0, qwen_unverified=0, judge_verified=0,
-                    judge_unverified=0, agreements=0, disagreements=0, error=str(exc),
+                    query=r["query"], qwen_verified=0, qwen_unverified=0, qwen_unchecked=0,
+                    judge_verified=0, judge_unverified=0, judge_unchecked=0,
+                    agreements=0, disagreements=0, error=str(exc),
                 )
             )
 

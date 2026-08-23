@@ -777,6 +777,82 @@ log the actual measured footprint here once available.
 ---
 **Return to `/context.md` for next steps.**
 
+### Entry 036
+**Phase:** 6/10, manual analysis of D-051's real numbers, now automated
+**Action taken:** worked through D-051's real per-query data by hand.
+**Real finding:** of the 12 real queries, disagreement between Qwen and
+the judge is concentrated in exactly 2 (`nuclear fusion`, `room-temp
+superconductors`) — every other comparable query agreed 100%
+(`CRISPR` 1/1, `2008 financial crisis` 9/9, `quantum computing` 3/3).
+On both disagreeing queries Qwen was the more lenient side — most
+starkly on `room-temp superconductors`: Qwen rated all 4 of its own
+citations supported; the judge agreed with only 1. This is a concrete,
+specific example of the self-preference/leniency risk D-049 named as
+the reason to use an independent judge, not an abstract concern.
+Separately: `2008 financial crisis`'s perfect 9/9-unsupported agreement
+is a retrieval-quality signal, not a judge-reliability one — kept
+distinct in the new report output.
+
+Automated this analysis (D-052) so future runs surface it without
+manual arithmetic: `JudgeComparisonReport.disagreeing_queries`,
+`.qwen_only_zero_queries`, `.perfect_agreement_all_unsupported_queries`,
+and a new "Disagreement concentration" section in the console/log
+output that explicitly names which side was more lenient per query.
+**Decisions logged this run:** D-052.
+**Regression status:** 236/236 across the full 15-file suite.
+**Refines D-051's "~5/12 queries had Qwen parse failures" into an
+exact figure**: 4 queries were genuine Qwen-side parse failures the
+judge resolved (`Japan population`, `solid-state battery
+developments`, `JWST discoveries`, `inflation rate`); 2 were genuinely
+zero citations on BOTH sides (`transistor invented`,
+`lithium-ion vs solid-state`) — a distinction the original report
+couldn't make because it didn't print unchecked counts at all.
+**Next action for next session:** confirm the new report sections
+render correctly on an actual fresh `--with-judge` run (validated so
+far against a reconstruction of existing data, not a new live run).
+Still outstanding, unchanged: the recurring `n_ctx` overflow (Entry
+034/035), the ambiguous-threshold cost/safety tradeoff (Entry 034),
+and the original zero-citation mystery in the plain (non-judge) run.
+
+### Entry 035
+**Phase:** 6/10, first real `--with-judge` confirmation
+**Action taken:** user ran the dual-judge comparison for real. Result:
+**Qwen3-4B self-judged accuracy 50.0%, Llama-3.1-8B judge accuracy
+45.7%, agreement rate 73.1% (19 agree / 7 disagree)** — first real
+D-049/D-050 data, logged to `docs/eval_log.md`.
+
+Traced a pattern that initially looked like a bug (`qwen(v=0,u=0)
+judge(v=4,u=1)` on several queries) to `citation_verifier.py`'s
+documented fail-open behavior: Qwen3-4B failed to produce parseable
+JSON for the citation-entailment task on ~5/12 queries, leaving those
+citations unchecked; the judge, given the same citations, succeeded.
+Not a bug — a real, concrete finding about Qwen3-4B's structured-output
+reliability on this specific task, exactly the kind of gap D-001 said
+would justify reconsidering fine-tuning.
+
+Found and fixed a real reporting gap while verifying this: the
+comparison report never showed `unchecked` counts, only verified/
+unverified — one query's numbers (`qwen(v=7,u=2)` vs `judge(v=5,u=5)`,
+9 vs 10 total) looked like a possible citation-count bug and couldn't
+be ruled out from the output alone. Added `qwen_unchecked`/
+`judge_unchecked` to the report and log entry, plus an explicit note
+when Qwen's own unchecked count is nonzero.
+**Decisions logged this run:** D-051.
+**Regression status:** 232/232 across the full 15-file suite (exact
+count re-verified).
+**Still open, now recurring:** the `n_ctx` overflow from Entry 034 hit
+AGAIN on the same query (ISS) in this run — two independent real runs,
+same failure class. Still needs the truncation-strategy decision from
+Entry 034, not yet made. Recommend prioritizing this next given it's
+now recurred.
+**Next action for next session:** decide and implement a token-budget/
+truncation strategy for the `n_ctx` overflow (now confirmed recurring,
+not a one-off); investigate the Qwen3-4B parse-failure rate further if
+useful (a larger sample would clarify whether ~5/12 is representative);
+still outstanding from Entry 034: diagnose the ambiguous-threshold
+cost/safety tradeoff, and re-run the plain (non-judge) eval with the
+new debug threading to resolve the original zero-citation mystery.
+
 ### Entry 034
 **Phase:** 6/8/10, second real-hardware run — real bugs found and fixed, real Phase 6 data obtained, two open findings need your input
 **Action taken:** user ran corrected queries plus `citation_accuracy_eval.py` for real. Results:

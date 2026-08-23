@@ -1658,5 +1658,116 @@ running on real hardware. Folds into the same real-hardware batch
 already on hold per Entry 030/031 — this adds one more command to that
 list, not a new separate ask.
 
+### D-051 — First real D-049/D-050 confirmation: dual-judge run completed; fixed a real reporting gap it exposed
+**Phase:** 6/10, first real execution of `--with-judge` on real hardware
+**Finding/Decision:** the user downloaded the real Llama-3.1-8B-Instruct
+GGUF and ran `citation_accuracy_eval.py --with-judge` for real. It
+completed successfully (11/12 queries; query 12 hit the same `n_ctx`
+overflow from Entry 034, still unfixed -- see below). Result: **Qwen3-4B
+self-judged accuracy 50.0%, Llama-3.1-8B judge accuracy 45.7%, agreement
+rate 73.1% (19 agree / 7 disagree)** -- the first real dual-judge data
+this project has ever produced, logged to `docs/eval_log.md`.
+
+**A pattern in the per-query output looked like a bug and almost got
+misdiagnosed as one.** Several queries showed `qwen(v=0,u=0)
+judge(v=4,u=1)` -- Qwen apparently finding nothing, the judge finding
+real verdicts on the SAME citations. Traced this to
+`citation_verifier.verify_citations()`'s own documented fail-open
+behavior: on a JSON parse failure, it returns citations UNCHANGED
+(`verified` stays `None`, i.e. unchecked) rather than guessing. Qwen3-4B
+failed to produce parseable structured output for the citation-
+entailment task on roughly 5 of 12 queries; the judge, given the exact
+same citations, succeeded. `agree=0 disagree=0` on those queries was
+CORRECT (an unresolved verdict on either side is excluded from the
+comparison, by design), not a bug.
+
+**This IS real, valuable Phase 6 data, not just an explanation for
+confusing output:** Qwen3-4B appears to have a meaningfully higher
+parse-failure rate on this specific structured-JSON task than the 8B
+judge -- a concrete, reproducible gap in the exact pairing this project
+ships at runtime (`citation_verifier.py` uses Qwen3-4B, not a judge, in
+production per D-006/D-032). This is precisely the kind of finding
+D-001 named as justification for reconsidering fine-tuning.
+
+**The real gap this exposed: `format_judge_comparison()` never printed
+`unchecked` counts, only `verified`/`unverified`.** One query
+(`"nuclear fusion"`) showed `qwen(v=7,u=2)` vs `judge(v=5,u=5)` -- 9
+total vs 10 total, which LOOKED like a citation-count mismatch (a real
+bug candidate) and could not be ruled out from the printed output alone.
+Root cause turned out to be an unprinted unchecked citation on Qwen's
+side that the judge then resolved -- not a bug, but the report couldn't
+prove that on its own. Fixed: `JudgeComparisonResult` now carries
+`qwen_unchecked`/`judge_unchecked`; both the console report and the
+`docs/eval_log.md` entry now show these explicitly, plus a summary note
+when Qwen's own unchecked count is nonzero, naming it as a reliability
+signal rather than leaving it implicit.
+
+**Still open, recurring, unaddressed:** query 12 (ISS) hit the exact
+same `n_ctx` overflow class from Entry 034 (`8389` vs `9381` tokens
+this time -- different number, same failure mode, same query). Two
+independent real runs have now hit this. Still not fixed -- still
+needs a deliberate truncation-strategy decision, not a mechanical patch,
+per Entry 034's original flag. Recommend prioritizing this now that
+it's recurred.
+**Files touched:** `tests/eval/citation_accuracy_eval.py`
+(`qwen_unchecked`/`judge_unchecked` fields, both construction sites in
+`run_eval_with_judge()` and `main_with_judge()`, both formatting
+functions), `test_phase10_judge_comparison.py` (+5 checks reproducing
+the exact real-hardware scenario: Qwen's own call fails to parse, judge
+succeeds on the same citations, unchecked counts now visible and
+explained in the output rather than looking like a bug).
+**Verification:** 232/232 across the full 15-file regression suite
+(exact count re-verified, not estimated -- `test_phase10_judge_
+comparison.py` is 19/19 with the 5 new checks included).
+
+### D-052 — Manual analysis of D-051's real numbers found a concrete finding; automated it into the report
+**Phase:** 6/10, follow-up to D-051's real dual-judge data
+**Finding/Decision:** worked through D-051's real per-query numbers by
+hand (reconstructed from the console output) to check whether the
+73.1% aggregate agreement rate was evenly distributed or concentrated.
+It's sharply concentrated: **of the queries where a real comparison was
+possible, only 2 of them (`nuclear fusion`, `room-temp
+superconductors`) account for ALL 7 disagreements** -- every other
+comparable query (`CRISPR`, `2008 financial crisis`, `quantum
+computing`) agreed 100%. On BOTH disagreeing queries, Qwen was the more
+lenient side -- most strikingly on `room-temp superconductors`, where
+Qwen rated all 4 of its own citations as supported while the judge
+agreed with only 1 of the 4. That's a concrete, specific instance of
+the self-preference/leniency risk D-049 named as the reason to use an
+independent judge in the first place, not an abstract concern anymore.
+
+Separately, `2008 financial crisis` showed perfect agreement that ALL 9
+citations were UNSUPPORTED -- both models agreeing is a retrieval/
+grounding quality signal, distinct from a judge-reliability signal, and
+conflating the two would misread what's actually wrong.
+
+**Automated this analysis into the harness** rather than leaving it as
+a one-off manual exercise (which took real, error-prone hand
+arithmetic to produce) -- `JudgeComparisonReport` gained three
+properties: `disagreeing_queries` (sorted by disagreement count,
+descending), `qwen_only_zero_queries` (Qwen-side parse failures the
+judge resolved -- refines D-051's "~5/12" figure into an exact,
+reproducible count), and `perfect_agreement_all_unsupported_queries`
+(the retrieval-quality signal, kept distinct from disagreement).
+`format_judge_comparison()` now prints a "Disagreement concentration"
+section (only when disagreement exists -- silent otherwise, not noise
+for the common case) that explicitly labels which side was more
+lenient per query, since that label is the actionable part.
+**Files touched:** `tests/eval/citation_accuracy_eval.py`,
+`test_phase10_judge_comparison.py` (+4 checks, including confirming the
+section is silent when there's no disagreement to report).
+**Verification:** re-ran the new `format_judge_comparison()` against a
+reconstruction of D-051's actual real-hardware numbers -- output
+correctly identifies both disagreeing queries, correctly labels "Qwen
+more lenient" on both, correctly separates the 4 Qwen-parse-failure
+queries from the 2 true-zero-citation queries (a distinction D-051's
+original "~5/12" estimate didn't have the data to make precisely).
+236/236 across the full 15-file regression suite.
+**Not yet re-confirmed against a NEW real run** -- this is validated
+against a reconstruction of the existing real data, not a fresh
+real-hardware execution of the new report code end-to-end. Recommend
+the next `--with-judge` run confirm the new sections render correctly
+in practice, not just against a hand-built test fixture.
+
 ---
 **Return to `/context.md` for next steps.**
