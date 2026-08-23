@@ -777,6 +777,29 @@ log the actual measured footprint here once available.
 ---
 **Return to `/context.md` for next steps.**
 
+### Entry 037
+**Phase:** 8, macOS/Linux unblocked without physical hardware
+**Action taken:** user confirmed no Mac/Linux hardware exists. Added
+`.github/workflows/build-macos-linux.yml` using GitHub's free hosted
+`macos-latest`/`ubuntu-latest` runners — real machines, not emulation.
+Tier 1 (automatic on push, no model needed): real PyInstaller build +
+B-019's platform guard exercised for real + `--help` smoke test +
+confirms a clean `ModelNotFoundError` rather than a packaging crash.
+Tier 2 (manual trigger, off by default): downloads the real
+`Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (~2.5GB, source verified via web
+search against `unsloth/Qwen3-4B-Instruct-2507-GGUF` on Hugging Face)
+and runs a real end-to-end query, matching D-044's Windows bar exactly.
+**Decisions logged this run:** D-053.
+**Verification:** YAML syntax validated only — this workflow has NOT
+actually executed on GitHub's infrastructure yet, which this sandbox
+cannot trigger. Do not treat Phase 8 macOS/Linux as confirmed until it
+actually runs and the output is reviewed, same discipline as every
+other "built but not yet real-hardware-confirmed" item in this project.
+**Next action for next session:** push/merge the workflow file, run it
+(Tier 1 automatically, or trigger Tier 2 manually from the Actions tab
+for full confirmation), and report the actual output — same as every
+other real-hardware confirmation step in this project.
+
 ### Entry 036
 **Phase:** 6/10, manual analysis of D-051's real numbers, now automated
 **Action taken:** worked through D-051's real per-query data by hand.

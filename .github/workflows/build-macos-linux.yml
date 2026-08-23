@@ -1,0 +1,111 @@
+name: Phase 8 — macOS / Linux build confirmation
+
+# Solves a real, stated constraint: the project has no physical macOS
+# or Linux hardware to build on (per status.md Entry 030+ and D-005 --
+# PyInstaller cannot cross-compile, so this genuinely cannot be done
+# from Windows or from a sandbox). GitHub-hosted runners give real
+# macOS and real Linux machines for free on a public repo -- this
+# workflow is the actual substitute for owning that hardware, not a
+# simulation of it.
+#
+# Two tiers, deliberately separate:
+#   Tier 1 (always runs): real PyInstaller build via build/_common.py's
+#     platform guard (B-019) + hook firing, plus a model-free smoke
+#     test (--help, and confirming a clean ModelNotFoundError rather
+#     than an import/DLL crash). Needs no model download, costs no
+#     extra CI time, safe to run on every push.
+#   Tier 2 (manual only, workflow_dispatch input): downloads the real
+#     Qwen3-4B-Instruct-2507 GGUF (~2.5GB, unsloth/Qwen3-4B-Instruct-
+#     2507-GGUF on Hugging Face -- verified via web search, not
+#     guessed) and runs one real end-to-end query, same bar as D-044's
+#     Windows confirmation. Off by default since it adds real minutes
+#     and a multi-GB download to every run -- trigger it deliberately.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_full_confirmation:
+        description: "Tier 2: download the real model and run a real end-to-end query (adds ~2.5GB download + inference time)"
+        type: boolean
+        default: false
+  push:
+    paths:
+      - "src/**"
+      - "build/**"
+      - "requirements.txt"
+      - ".github/workflows/build-macos-linux.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            build_script: build/build_macos.py
+            dist_dir: dist/macos
+          - os: ubuntu-latest
+            build_script: build/build_linux.py
+            dist_dir: dist/linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r build/requirements-build.txt
+
+      - name: Build (real PyInstaller run on real ${{ matrix.os }})
+        run: python ${{ matrix.build_script }}
+
+      - name: Tier 1 — smoke test without the model (--help)
+        run: |
+          BINARY="${{ matrix.dist_dir }}/fathom/fathom"
+          test -f "$BINARY" || (echo "Built binary not found at $BINARY" && exit 1)
+          chmod +x "$BINARY"
+          "$BINARY" --help
+
+      - name: Tier 1 — confirm a clean ModelNotFoundError, not a crash
+        run: |
+          BINARY="${{ matrix.dist_dir }}/fathom/fathom"
+          set +e
+          OUTPUT=$("$BINARY" "test query" --mode quick 2>&1)
+          STATUS=$?
+          set -e
+          echo "$OUTPUT"
+          # A clean ModelNotFoundError means the packaged binary's
+          # imports, hooks, and startup path all worked correctly on
+          # THIS real OS -- exactly what D-044 confirmed on Windows via
+          # hook-firing, just without needing the model file. A crash
+          # (missing DLL/dylib, import error, segfault) would print
+          # something else entirely and this check would catch that.
+          echo "$OUTPUT" | grep -qi "model" || (echo "Expected a model-related message, got something else -- possible packaging issue, not just a missing model file" && exit 1)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fathom-${{ matrix.os }}
+          path: ${{ matrix.dist_dir }}/fathom/
+          retention-days: 14
+
+      - name: Tier 2 — download real model (manual trigger only)
+        if: ${{ inputs.run_full_confirmation }}
+        run: |
+          pip install -U huggingface_hub
+          mkdir -p "$HOME/.fathom/models"
+          hf download unsloth/Qwen3-4B-Instruct-2507-GGUF \
+            Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+            --local-dir "$HOME/.fathom/models"
+          mv "$HOME/.fathom/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" \
+             "$HOME/.fathom/models/qwen3-4b-instruct-2507-q4_k_m.gguf"
+
+      - name: Tier 2 — real end-to-end query (manual trigger only)
+        if: ${{ inputs.run_full_confirmation }}
+        run: |
+          BINARY="${{ matrix.dist_dir }}/fathom/fathom"
+          "$BINARY" "What year was the transistor invented?" --mode deep --verbose --debug

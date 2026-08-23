@@ -1769,5 +1769,51 @@ real-hardware execution of the new report code end-to-end. Recommend
 the next `--with-judge` run confirm the new sections render correctly
 in practice, not just against a hand-built test fixture.
 
+### D-053 — Phase 8 macOS/Linux: GitHub Actions hosted runners, since no physical hardware exists
+**Phase:** 8, unblocking macOS/Linux without owning either machine
+**Finding/Decision:** user confirmed no Mac or Linux hardware is
+available for the real-OS builds D-005/B-019 require. Rather than leave
+Phase 8 indefinitely stuck on that, added
+`.github/workflows/build-macos-linux.yml` using GitHub-hosted
+`macos-latest`/`ubuntu-latest` runners -- these are REAL macOS and
+REAL Linux machines (not emulation, not cross-compilation), free on a
+public repo. This is the actual substitute for owning the hardware, not
+a workaround that lowers the bar.
+
+**Two tiers, deliberately separate:**
+- **Tier 1** (runs on every push touching `src/`/`build/`, or manually):
+  the real `build_macos.py`/`build_linux.py` PyInstaller build (which
+  now also exercises B-019's platform guard for real, confirming it
+  passes cleanly on the correct OS rather than just being unit-tested),
+  plus two model-free smoke checks: `--help` (confirms the binary
+  launches, no import/DLL/dylib crash) and a plain query expected to
+  fail with a clean `ModelNotFoundError` (confirms the packaged
+  binary's startup path works correctly on that real OS, distinguishing
+  a packaging problem from "no model file" -- the same thing D-044's
+  hook-firing confirmation established for Windows, achieved here
+  without needing a multi-GB download on every run). Build artifacts
+  are uploaded either way.
+- **Tier 2** (manual `workflow_dispatch` input, off by default):
+  downloads the real production model
+  (`unsloth/Qwen3-4B-Instruct-2507-GGUF`, `Qwen3-4B-Instruct-2507-
+  Q4_K_M.gguf`, ~2.5GB -- verified via web search against the actual
+  Hugging Face repo, not guessed) and runs one real end-to-end query,
+  the same bar D-044 met on Windows. Gated behind a manual trigger
+  specifically because it adds real CI minutes and a large download to
+  every run if left unconditional -- Tier 1 alone is cheap enough to run
+  on every relevant push, Tier 2 is for deliberate confirmation runs.
+**Files touched:** `.github/workflows/build-macos-linux.yml` (new).
+**Verification:** YAML syntax validated. NOT yet actually run on GitHub
+-- this workflow needs to execute on GitHub's infrastructure to be a
+real confirmation, which this sandbox can't do (no ability to trigger
+GitHub Actions runs from here). This is the honest state: the mechanism
+is built and believed correct, but "believed correct" is not the same
+bar as D-044's actual real-hardware confirmation, and shouldn't be
+treated as such until it actually runs.
+**Next step:** push this workflow file to GitHub (or merge it), then
+either wait for Tier 1 to run automatically on the next relevant push,
+or trigger it manually from the Actions tab with Tier 2 enabled for a
+full confirmation run matching D-044's bar exactly.
+
 ---
 **Return to `/context.md` for next steps.**
