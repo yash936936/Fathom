@@ -1814,6 +1814,80 @@ treated as such until it actually runs.
 either wait for Tier 1 to run automatically on the next relevant push,
 or trigger it manually from the Actions tab with Tier 2 enabled for a
 full confirmation run matching D-044's bar exactly.
+### D-054 — Phase 8 macOS/Linux Tier 1 CONFIRMED on real hardware (via GitHub Actions); citation_verifier debug instrumentation added; B-020 confirmed fixed
+**Phase:** 8 confirmation + 6 diagnostics
+**Finding/Decision, Phase 8:** the `.github/workflows/build-macos-
+linux.yml` workflow from D-053 ran for real -- pushed, triggered
+automatically, both matrix jobs (`macos-latest`, `ubuntu-latest`)
+completed with status **Success**, 3m59s total, 2 build artifacts
+produced. This is genuine confirmation that `build_macos.py`/
+`build_linux.py` (including B-019's platform guard, which had to pass
+correctly on the real matching OS for the job to succeed at all) work
+on real macOS and real Linux. **This is Tier 1 only** -- the build and
+model-free smoke tests, not a full real-query grounded-answer
+confirmation matching D-044's Windows bar. Tier 2 (manual
+`workflow_dispatch` with `run_full_confirmation` checked) has not been
+triggered yet. Two informational annotations (Node.js 20 deprecation
+warnings on the underlying GitHub Actions themselves) appeared -- not a
+Fathom issue, a GitHub Actions infra note, low priority, worth a future
+`actions/checkout@v5`/`setup-python@v6` bump whenever convenient.
+
+**Finding, Phase 6 -- citation_verifier reliability, escalated:** two
+more real runs (plain + `--with-judge`) both showed a MORE severe
+pattern than D-051 first found: 5 of 12 queries in the plain run had a
+COMPLETE parse failure (100% of that query's citation batch left
+unchecked), not just partial. Total unchecked count also rose (29 this
+run vs 18 in the first plain run). A batch-size correlation looked
+plausible at first glance (`nuclear fusion`'s 11-citation batch failed
+completely) but a clean counterexample ruled out a simple explanation:
+`CRISPR`'s 4-citation batch parsed perfectly while `2008 financial
+crisis`, `quantum computing`, and `room-temp superconductors` -- also
+4-citation batches -- failed completely. **Deliberately did NOT guess
+a root cause or a fix from count data alone** -- added `debug_report`
+threading to `citation_verifier.verify_citations()` so a parse failure
+now surfaces the ACTUAL raw model response, batch size, and
+`max_tokens` budget used, threaded through both `rag/graph.py` and
+`tests/eval/citation_accuracy_eval.py`'s three call sites. This
+doesn't fix the problem -- it makes the next real run capable of
+actually diagnosing it (truncation vs. genuine malformation vs.
+something else) instead of continuing to guess from aggregate counts.
+
+**B-020 CONFIRMED FIXED on real hardware:** the corrected
+`--self-consistency` query ran again -- `self-consistency: checked=True
+flagged=[]`. No spurious `Note`/`Specifically`/citation-digit flags,
+confirming the `raw_synthesized_answer` fix and the regex fixes both
+hold on real output, not just the sandbox reconstruction from before.
+
+**Honest revision to D-052's leniency-direction claim:** D-052,
+working from ONE real run, found Qwen was the more lenient side on
+both disagreeing queries and framed that as a signal worth watching.
+THIS run's `--with-judge` execution shows the exact opposite: all 4
+disagreements this time were "judge more lenient" (judge found MORE
+citations supported than Qwen did). Two data points in opposite
+directions do not support a stable one-directional bias claim --
+correcting course rather than cherry-picking the run that fit the
+earlier narrative. What DOES still replicate across both runs: Qwen's
+own parse-failure/unchecked rate remains real and recurring (6
+unchecked in this `--with-judge` run's Qwen phase, on top of the
+plain run's 29). That's the part with two consistent data points, not
+the leniency direction.
+
+**Also fixed in passing:** a leftover duplicate line
+(`judge_input = [...]` assigned twice, harmless but sloppy) from
+D-051's edit, found while adding the debug threading.
+
+**Files touched:** `src/verification/citation_verifier.py`
+(`debug_report` param), `src/rag/graph.py` (threads it through),
+`tests/eval/citation_accuracy_eval.py` (threads it through all three
+call sites, dedup fix), `test_phase6_manual.py` (+6 checks, including
+one reproducing a truncated-mid-array pattern).
+**Verification:** 242/242 across the full 15-file regression suite.
+**Not yet done:** Phase 8 Tier 2 (real model, real query, full D-044
+parity) on macOS/Linux; the actual root-cause diagnosis of the
+citation_verifier parse failures (now instrumented, but needs one more
+real run to capture actual raw failure text); re-running the disagreement-
+concentration analysis with a 3rd data point before drawing any
+conclusion about leniency direction one way or the other.
 
 ---
 **Return to `/context.md` for next steps.**

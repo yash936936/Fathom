@@ -17,6 +17,7 @@ materially different (much worse) cost profile than one extra call.
 from __future__ import annotations
 
 import json
+from typing import Callable
 
 from core.llm_backend import FathomModel
 from core.state import Citation, RetrievedChunk
@@ -45,6 +46,7 @@ def verify_citations(
     citations: list[Citation],
     chunks: list[RetrievedChunk],
     model: FathomModel,
+    debug_report: Callable[[str], None] | None = None,
 ) -> list[Citation]:
     """Returns a new citations list with `verified` resolved to True/
     False for every entry that was previously None (not yet checked).
@@ -57,6 +59,16 @@ def verify_citations(
     None where unchecked) rather than guessing true or false -- a
     verification step that silently marks unchecked claims as "verified"
     on its own failure would be worse than not running at all.
+
+    `debug_report`, if given, receives the RAW model response on a
+    parse failure. Added after real-hardware runs (status.md Entry
+    034/035/038) showed a recurring, sometimes-total (100% of a
+    batch) parse-failure pattern with no way to tell truncation
+    (hit max_tokens before finishing the JSON) from genuine
+    malformation (extra prose, wrong quoting, etc.) apart -- this
+    doesn't guess which one it is, it just makes the actual raw text
+    visible so that question can be answered from real data on the
+    next run, instead of guessed at.
     """
     to_check = [c for c in citations if c.get("verified") is None]
     if not to_check:
@@ -79,7 +91,13 @@ def verify_citations(
         end = raw.rindex("]") + 1
         parsed = json.loads(raw[start:end])
         verdicts = {int(item["index"]): bool(item["supported"]) for item in parsed}
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        if debug_report:
+            debug_report(
+                f"citation_verifier parse failure ({len(to_check)} citations "
+                f"in batch, max_tokens={max(80, 20 * len(to_check))}): "
+                f"{type(exc).__name__}: {exc}. Raw response: {raw!r}"
+            )
         return citations
 
     result: list[Citation] = []

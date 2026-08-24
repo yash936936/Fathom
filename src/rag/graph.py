@@ -219,7 +219,9 @@ def build_graph(
         # agentic path only, one batched call for the whole answer, not
         # per-claim. Phase 6.
         report("Verifying citations")
-        citations = citation_verifier.verify_citations(state.get("citations", []), chunks, model)
+        citations = citation_verifier.verify_citations(
+            state.get("citations", []), chunks, model, debug_report=debug_report
+        )
         state["citations"] = citations
 
         _verified, unverified, unchecked = citation_verifier.summarize(citations)

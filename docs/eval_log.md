@@ -29,8 +29,3 @@ tests/eval/citation_accuracy_eval.py`) and Qwen-vs-judge comparison
 runs (`python tests/eval/citation_accuracy_eval.py --with-judge`,
 D-049/D-050) — the comparison entries are headed "Qwen vs. Llama-3.1-8B
 judge comparison" so the two are easy to tell apart at a glance.
-
-### 2026-08-23 20:22 UTC
-**Hardware:** (unspecified)
-**Queries run:** 12 (0 errored)
-**Per-claim citation accuracy:** 26.7% (4 verified / 11 unverified / 29 unchecked)

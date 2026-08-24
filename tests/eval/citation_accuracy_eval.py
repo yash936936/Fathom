@@ -339,8 +339,7 @@ def run_eval_with_judge(
             # exactly as it would on a fresh run -- otherwise it would
             # skip everything, since Qwen already resolved them.
             judge_input = [{**c, "verified": None} for c in qwen_citations]
-            judge_input = [{**c, "verified": None} for c in qwen_citations]
-            judge_citations = verify_citations(judge_input, chunks, judge_model)
+            judge_citations = verify_citations(judge_input, chunks, judge_model, debug_report=report)
             judge_verified, judge_unverified, judge_unchecked = summarize(judge_citations)
 
             agreements = 0
@@ -520,7 +519,10 @@ def main_with_judge() -> int:
     for i, query in enumerate(queries, 1):
         print(f"[phase A: Qwen3-4B, {i}/{len(queries)}] {query}", file=sys.stderr)
         try:
-            final_state = _run_agentic(query, model, enable_self_consistency=False)
+            final_state = _run_agentic(
+                query, model, enable_self_consistency=False,
+                debug_report=lambda msg: print(f"  [debug] {msg}", file=sys.stderr),
+            )
             phase_a_results.append(
                 {
                     "query": query,
@@ -559,7 +561,10 @@ def main_with_judge() -> int:
         try:
             qwen_verified, qwen_unverified, qwen_unchecked = _summarize(r["citations"])
             judge_input = [{**c, "verified": None} for c in r["citations"]]
-            judge_citations = verify_citations(judge_input, r["chunks"], judge_model)
+            judge_citations = verify_citations(
+                judge_input, r["chunks"], judge_model,
+                debug_report=lambda msg: print(f"  [debug] {msg}", file=sys.stderr),
+            )
             judge_verified, judge_unverified, judge_unchecked = _summarize(judge_citations)
 
             agreements = disagreements = 0

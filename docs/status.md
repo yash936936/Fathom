@@ -30,10 +30,13 @@
   not a separate gap.
 - **Windows packaging (Phase 8): still done, unchanged** — real build,
   real hook firing, real standalone execution, real grounded answer
-  (D-044). Not touched this session.
-- **macOS and Linux (Phase 8): still open** — per D-005, each needs its
-  own OS to build on. Not touched this session; still the other
-  legitimate next step alongside Phase 6 real-hardware confirmation.
+  (D-044).
+- **macOS and Linux (Phase 8): Tier 1 CONFIRMED via GitHub Actions
+  (D-053/D-054)** — real build succeeded on both real macOS and real
+  Linux hosted runners, B-019's platform guard passed correctly, smoke
+  tests passed. **Tier 2 (real model, real grounded answer, full D-044
+  parity) NOT yet run** — needs a manual `workflow_dispatch` trigger.
+  Do not treat Phase 8 as fully closed until Tier 2 actually runs.
 - **Open cost question — RESOLVED this follow-up (D-046):**
   `enable_self_consistency` now defaults to **False** in both
   `build_graph()` and `run_agentic()`. D-045 had left it defaulting to
@@ -776,6 +779,43 @@ log the actual measured footprint here once available.
 
 ---
 **Return to `/context.md` for next steps.**
+
+### Entry 038
+**Phase:** 8 confirmed (Tier 1), 6 diagnostics improved
+**Action taken:** Phase 8's GitHub Actions workflow (D-053) ran for
+real — **both macOS and Linux builds SUCCEEDED** (3m59s, 2 artifacts,
+screenshot confirmed). This is real Tier 1 confirmation: B-019's
+platform guard passed correctly on the real matching OS, the build
+completed, smoke tests passed. **Not yet Tier 2** — no real-query
+grounded-answer confirmation on macOS/Linux yet, that still needs a
+manual `workflow_dispatch` trigger.
+
+Two more real evals (plain + `--with-judge`) showed citation_verifier's
+parse-failure problem is WORSE than D-051 first found — 5/12 queries
+had a complete (100%) batch parse failure this time, up from partial
+failures before. Looked for a batch-size correlation; found a clean
+counterexample (`CRISPR`'s 4-citation batch succeeded, three OTHER
+4-citation batches failed completely) that rules out a simple
+explanation. Did not guess further — added `debug_report` threading to
+`citation_verifier.verify_citations()` so the next real run captures
+the actual raw failed response instead of just a count.
+
+**B-020 CONFIRMED FIXED for real**: `self-consistency: checked=True
+flagged=[]` on the corrected query — no spurious flags.
+
+**Correcting D-052**: that entry claimed Qwen was "more lenient" based
+on one run. This run shows the opposite (judge more lenient on all 4
+disagreements) — two data points in opposite directions don't support
+a directional bias claim. Retracting that specific framing rather than
+keeping it on the record uncorrected. What DOES hold across both runs:
+Qwen's parse-failure rate itself, which is real and recurring.
+**Decisions logged this run:** D-054.
+**Regression status:** 242/242 across the full 15-file suite.
+**Next action for next session:** trigger Phase 8 Tier 2 manually for
+full D-044 parity; run the eval again with the new debug instrumentation
+to actually see a raw failed citation_verifier response and diagnose
+the real cause; treat leniency-direction as genuinely unknown until a
+3rd data point exists, not two-out-of-two in either direction.
 
 ### Entry 037
 **Phase:** 8, macOS/Linux unblocked without physical hardware
