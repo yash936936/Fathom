@@ -7,7 +7,18 @@
 ---
 
 ## Current state
-- **Active phase: Phase 9 — started.** Phase 6 and Phase 8 both closed
+- **Active phase: Phase 10 — started (D-059).** Built `tests/eval/
+  golden_set.jsonl` (32 entries, 4 categories) and `tests/eval/
+  golden_set_eval.py`, scoped specifically to the two `prd.md` §5
+  success criteria nothing previously covered: off-domain refusal rate
+  (>=95% threshold) and zero-silent-hallucination (via an explicitly
+  honest proxy check — flags candidates for human review, never claims
+  to detect hallucination directly). Citation accuracy and the <6GB
+  constraint are already covered elsewhere (Phase 6's eval harness,
+  and an architectural property respectively) — not duplicated here.
+  **No real run yet** — same standing gap as every eval tool before
+  its first real-hardware execution.
+- **Phase 9 — started, Windows track fully closed.** Phase 6 and Phase 8 both closed
   per user direction (Aug 24): Phase 6 legitimately meets its literal
   exit criteria (citation accuracy metric established and tracked,
   D-048/D-051); Phase 8's Windows track fully meets its Goal (D-044),
@@ -39,15 +50,17 @@
   (no HF network access from this sandbox) — `model_downloader.py` is
   tested with mocked `requests` only. Real compilation of
   `installer.iss`, real `.pkg`-triggered run of `postinstall.sh`.
-- **UPDATE (D-057, real hardware):** the two biggest items above are
-  now CONFIRMED. Real ~2.38GB download completed, checksum matched
-  (the pinned SHA256 was correct), `first_run_check.py` confirmed
-  (load 48.4s, generation 7.6s), a real post-download query produced a
-  correctly grounded answer, and `installer.iss` compiled successfully
-  with real `ISCC.exe` (`fathom-setup.exe` produced). GitHub Actions
-  Tier 1 still green after all of Phase 9's commits. **Still open:**
-  actually running `fathom-setup.exe` (compiling ≠ running), Phase 8
-  Tier 2, and `postinstall.sh` on a real Mac.
+- **UPDATE (D-058, real hardware): Phase 9's Windows track is now
+  FULLY CLOSED.** `fathom-setup.exe` compiled AND was actually run —
+  installed correctly, a real post-install query produced a correctly
+  grounded answer, `unins000.exe` (the uninstaller) is present, and
+  BOTH Start Menu shortcuts (`Fathom.lnk`, `Uninstall Fathom.lnk`)
+  confirmed present, exactly matching `installer.iss`'s `[Icons]`
+  section. Nothing left uncertain on Windows for Phase 9. **Still
+  open, unchanged:** macOS `postinstall.sh` (needs a real Mac, none
+  available), Linux via a packaged installer flow (already
+  functionally tested directly per D-056, not yet via a distributable
+  install path), and Phase 8 Tier 2.
 
 - **Everything below this point in earlier sessions' narrative has
   been superseded by later entries in the Log below** (Entries
@@ -57,6 +70,63 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 042
+**Phase:** 10, started
+**Action taken:** user said "phase 10." Flagged briefly that Phase 9
+isn't fully closed by its own exit criteria (Windows fully confirmed,
+Linux functionally tested but not via a packaged installer, macOS
+still blocked on hardware) before proceeding — same pattern as Phase
+6/8's closure discussions.
+
+Checked `prd.md` §5's five success criteria against existing tooling
+before building anything, to avoid duplicating work: citation accuracy
+is already covered (Phase 6's `citation_accuracy_eval.py` +
+`docs/eval_log.md`'s real tracked history), and the <6GB constraint is
+architectural, not eval-measured. Built `tests/eval/golden_set.jsonl`
+(32 entries: 10 answerable, 10 off-domain, 6 false-premise, 6
+low-evidence) and `tests/eval/golden_set_eval.py`, scoped to the two
+criteria nothing previously measured: off-domain refusal rate (scored
+against `prd.md`'s stated >=95% threshold) and zero-silent-
+hallucination (via an explicitly honest proxy signal — flags
+uncited/uncaveated confident answers as human-review candidates, never
+claims to detect hallucination directly, since no component in this
+codebase can verify factual correctness against ground truth).
+**Decisions logged this run:** D-059.
+**Regression status:** 304/304 across the full 19-file suite.
+**Not yet done:** no real run — same standing gap as every eval tool
+in this project before its first real-hardware execution. 32 entries
+is a starting golden set, not `trd.md` §7's full 50-100.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py` on real hardware; based on what it finds, decide whether to
+expand the golden set toward the full 50-100, and whether any
+low-evidence review candidates turn out to be real problems.
+
+### Entry 041
+**Phase:** 9, Windows track fully closed
+**Action taken:** user ran `fathom-setup.exe` for real (not just
+compiled it), confirmed the install directory contents, the uninstaller,
+a real post-install grounded query, and both Start Menu shortcuts.
+**Real results:** `fathom.exe`, `_internal/`, `unins000.exe`/
+`unins000.dat` all present at the install path; a real query ("boiling
+point of water") produced a correctly grounded, 5-source-cited answer
+from the installed binary; `Fathom.lnk` and `Uninstall Fathom.lnk`
+both confirmed present in the Start Menu, matching `installer.iss`'s
+`[Icons]` section exactly.
+**Decisions logged this run:** D-058.
+**Regression status:** unchanged (no code changed — pure real-hardware
+confirmation).
+**Phase 9 exit criteria met on Windows:** yes, in full — "clean install
+→ working `fathom` command" confirmed end-to-end: compile, run, file
+placement, shortcuts, model download+checksum, real grounded output.
+**Still open:** macOS `postinstall.sh` (needs a real Mac — none
+available), Linux via a packaged installer flow, Phase 8 Tier 2.
+**Next action for next session:** if/when a Mac becomes available, run
+`postinstall.sh` for real; otherwise, decide whether Phase 9 should be
+considered "closed enough" with Windows fully confirmed and Linux
+functionally (if not installer-flow) tested, macOS remaining the one
+genuinely blocked platform — same shape of decision as Phase 8's
+Windows-first closure.
 
 ### Entry 040
 **Phase:** 9, first real-hardware confirmation

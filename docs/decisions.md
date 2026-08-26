@@ -2032,6 +2032,104 @@ not a code change.
 install experience itself (not just that it compiles); Phase 8 Tier 2
 (a real macOS/Linux query, still not manually triggered); real
 `postinstall.sh` execution (still needs an actual Mac).
+### D-058 — Phase 9 Windows track FULLY CLOSED on real hardware
+**Phase:** 9, Windows track complete
+**Finding:** the last three open items from D-057 all confirmed on
+real hardware:
+- `fathom-setup.exe` was actually RUN (not just compiled) — installed
+  to a real path, ran end-to-end without error.
+- The installed binary produces a correctly grounded, multi-source
+  cited answer (boiling point query, 5 real sources) — proves the
+  installed output works standalone, not just the dev build.
+- `ls` on the install directory shows `fathom.exe`, `_internal/` (the
+  bundled DLLs), AND `unins000.exe`/`unins000.dat` — Inno Setup's
+  auto-generated uninstaller is present and correctly placed.
+- Both Start Menu shortcuts from the `[Icons]` section confirmed
+  present: `Fathom.lnk` and `Uninstall Fathom.lnk`, exactly matching
+  what `installer.iss` declares -- nothing missing, nothing extra.
+
+**Phase 9's Windows track now meets its own stated exit criteria in
+full**: "clean install → working `fathom` command" -- installer
+compiles, runs, places files correctly, creates both shortcuts, model
+downloads and checksums correctly, and the installed binary produces
+real grounded answers. Every piece of this was independently
+uncertain at the start of this session (an unverified checksum, an
+untested `.iss` syntax, an installer that had only ever been compiled,
+never run) and is now confirmed, not assumed.
+**Files touched:** none -- real-hardware confirmation entry.
+**Still open, unchanged:** macOS (`postinstall.sh` needs a real Mac --
+none available, per earlier discussion; D-053's GitHub Actions
+workaround covers Phase 8's build/smoke-test tier but not a real `.pkg`
+install experience) and Linux's `install.sh` (functionally tested on
+this project's own sandbox already, per D-056, but not via a packaged
+installer flow the way Windows now has). Phase 8 Tier 2 (a real
+macOS/Linux query, not just build success) still not manually
+triggered.
+### D-059 — Phase 10 started: golden set + eval runner, scoped to what's NOT already covered
+**Phase:** 10
+**Finding/Decision:** `prd.md` §5 lists five success criteria. Before
+building anything, checked which are already covered by existing
+tooling to avoid duplicating work: "per-claim citation accuracy
+tracked" is already `tests/eval/citation_accuracy_eval.py` (D-048) +
+`docs/eval_log.md`'s real tracked history; "<6GB RAM / CPU-only" is an
+architectural constraint (no GPU code anywhere), not something an eval
+script measures -- a real memory profile during a real run is a
+separate, manual check, not built here. That left TWO criteria with
+zero existing coverage: refusal rate on off-domain queries (>=95%) and
+zero silent hallucination (flagged low-confidence answers don't count
+as failures). Built `tests/eval/golden_set.jsonl` (32 entries, 4
+categories) and `tests/eval/golden_set_eval.py` scoped specifically to
+measure those two.
+
+**Categories, each mapping to a specific criterion:**
+- `answerable` (10) — genuinely answerable research questions. Scored
+  for the FALSE-POSITIVE direction of criterion #3: an over-eager
+  domain_gate refusing a legitimate question is the opposite failure
+  mode from under-refusing off-domain ones, and nothing previously
+  tracked it.
+- `off_domain` (10) — coding requests, creative writing, roleplay,
+  translation, etc. Scored directly against `prd.md`'s stated >=95%
+  threshold.
+- `false_premise` (6) — reused the same class of query
+  `answerability.py` was built for (D-045), scored as a distinct
+  "catch rate" from domain refusal, since they're different subsystems
+  (`domain_gate` vs `answerability`) and conflating them would hide
+  which one is actually doing the work.
+- `low_evidence` (6) — deliberately obscure/unanswerable-with-available-
+  tools questions (private board meetings, unpublished data,
+  real-time GPS of a specific truck). This is the direct probe for
+  "zero silent hallucination."
+
+**Explicit honesty constraint, stated in the module docstring and
+enforced in the code, not just claimed:** this script CANNOT verify
+factual correctness -- no component in this codebase can, including
+`citation_verifier.py`'s own entailment check, which verifies a claim
+against a CITED source, not against ground truth. What it CAN detect
+is the proxy signal that would make silent hallucination POSSIBLE: a
+confident answer with neither a citation tag nor a low-confidence
+caveat. `low_evidence_review_candidates` names these explicitly as
+"NOT a confirmed hallucination, needs manual check" in both the
+console report and the log entry -- never overstated as a hallucination
+detector.
+
+Runs through `main.run_query()` (the REAL front door: `domain_gate` →
+`router` → path), not a forced-agentic shortcut like
+`citation_accuracy_eval.py` uses -- that distinction matters here
+specifically, since off-domain and false-premise detection both
+depend on gates a forced-agentic run would bypass entirely.
+**Files touched:** `tests/eval/golden_set.jsonl` (new, 32 entries),
+`tests/eval/golden_set_eval.py` (new), `test_phase10_golden_set_
+eval.py` (new, 16/16 -- validates the classification logic for all
+four categories plus the error-handling and empty-report paths, using
+the exact same stub-model pattern established for the rest of this
+project's eval tooling).
+**Verification:** 304/304 across the full 19-file regression suite.
+**Not yet done:** no real run -- this sandbox has no network access to
+the retrieval tools or the real model, same standing gap as every
+other eval tool in this project before its first real-hardware
+execution. 32 entries is a starting set, not `trd.md` §7's full 50-100
+-- expandable once real-run data shows which categories need more
+coverage.
 
 ---
 **Return to `/context.md` for next steps.**

@@ -94,17 +94,18 @@ optimized per `trd.md` NFRs.
 GGUF with progress + checksum, verifies model loads before declaring success.
 **Exit criteria:** clean install → working `fathom` command on a
 machine with nothing pre-installed, on all three OSes.
-**Status (D-055/D-056, real-hardware confirmed D-057):** all five files
-built. `model_downloader.py`'s pinned checksum CONFIRMED CORRECT
-against a real ~2.38GB download; `first_run_check.py` CONFIRMED
-working (real load/generation timings on record); `installer.iss`
-CONFIRMED compiling with real `ISCC.exe`, producing `fathom-setup.exe`.
-Linux `install.sh` functionally tested end-to-end on a real Linux
-machine (this project's sandbox). **Still not done:** actually running
-`fathom-setup.exe` (compiling is necessary but not sufficient for the
-"clean install" exit criteria); macOS `postinstall.sh` still needs a
-real Mac. Exit criteria genuinely met on ZERO of three OSes yet — the
-closest is Windows, one step (running the compiled installer) short.
+**Status (D-055/D-056, real-hardware confirmed D-057/D-058):**
+**Windows track FULLY CLOSED** — `installer.iss` compiles with real
+`ISCC.exe`, `fathom-setup.exe` runs and installs correctly, both Start
+Menu shortcuts confirmed present, the model downloads with a checksum
+confirmed correct against the real file, and the installed binary
+produces real grounded answers. Linux `install.sh` functionally
+tested end-to-end on a real Linux machine (this project's sandbox),
+though not yet via a packaged/distributable installer flow the way
+Windows now has. **Still not done:** macOS `postinstall.sh` — needs a
+real Mac, none available. Exit criteria met in full on Windows; Linux
+close but not identical in form; macOS genuinely blocked pending
+hardware access.
 
 ## Phase 10 — Evaluation, hardening, release prep
 **Files:** `tests/eval/golden_set.jsonl`, `tests/unit/*`
@@ -114,6 +115,16 @@ Instruct GGUF), not Qwen3-4B judging itself and not a hosted API — see
 `decisions.md` D-049.
 **Exit criteria:** metrics logged in `status.md`; `readme.md` finalized;
 tag v1.0.
+**Status (D-059):** `golden_set.jsonl` built (32 entries — a starting
+set, not yet the full 50-100) and `golden_set_eval.py`, scoped to the
+two `prd.md` §5 criteria nothing previously measured (off-domain
+refusal rate, zero-silent-hallucination via an honest proxy check).
+Citation accuracy already covered by Phase 6's tooling, not
+duplicated. **Not yet done:** no real run; `tests/unit/*` (the
+existing 19-file test suite is still scattered at repo root, not
+reorganized into this structure — deferred as a separate, careful pass
+given the real risk of breaking `sys.path` assumptions across every
+existing test file); `readme.md` finalization; v1.0 tag.
 
 ## v2 (not started until v1 ships and is stable)
 Long-term memory, smart routing/fallback across hosted models, multi-agent
