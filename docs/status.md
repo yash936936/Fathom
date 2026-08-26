@@ -7,87 +7,129 @@
 ---
 
 ## Current state
-- **ON HOLD, updated with REAL first-hardware data:** the user ran the
-  Phase 6/8 confirmation commands on real Windows hardware. Results
-  below. Still not fully closed — corrected test queries and a real
-  bug fix are needed before re-running, and macOS/Linux still haven't
-  been genuinely tested on their own OS (see below).
-- **Active phase:** Phase 6 — now CODE-COMPLETE. All three planned
-  modules exist and are wired: `citation_verifier.py` (previously
-  confirmed working), and this session's new
-  `verification/answerability.py` and `verification/self_consistency.py`.
-  Wired into both the fast path (`main.py`) and agentic path
-  (`rag/graph.py`, new `answerability_pre` node + expanded
-  `verification` node). See D-045 for full design writeup, including an
-  explicit, unresolved cost tradeoff on `self_consistency.py` (adds a
-  full extra synthesis call to every agentic query — see below).
-- **Phase 6 exit criteria:** the metric-mechanism gap is now CLOSED
-  (D-048) — `tests/eval/citation_accuracy_eval.py` establishes and
-  tracks per-claim citation accuracy per `trd.md` §7, validated
-  end-to-end with a stub model (18/18). What's still open is the DATA:
-  no real run has happened yet, so `docs/eval_log.md` has zero real
-  entries. That's part of the same "ON HOLD" real-hardware batch below,
-  not a separate gap.
-- **Windows packaging (Phase 8): still done, unchanged** — real build,
-  real hook firing, real standalone execution, real grounded answer
-  (D-044).
-- **macOS and Linux (Phase 8): Tier 1 CONFIRMED via GitHub Actions
-  (D-053/D-054)** — real build succeeded on both real macOS and real
-  Linux hosted runners, B-019's platform guard passed correctly, smoke
-  tests passed. **Tier 2 (real model, real grounded answer, full D-044
-  parity) NOT yet run** — needs a manual `workflow_dispatch` trigger.
-  Do not treat Phase 8 as fully closed until Tier 2 actually runs.
-- **Open cost question — RESOLVED this follow-up (D-046):**
-  `enable_self_consistency` now defaults to **False** in both
-  `build_graph()` and `run_agentic()`. D-045 had left it defaulting to
-  `True` while separately flagging the cost as unresolved — that
-  wasn't actually a resolution, it just shipped the more expensive
-  behavior by default while saying so. Now off until real-hardware
-  timing data justifies turning it on.
-- **Doc-consistency note — FIXED this follow-up (D-046):**
-  `code_logic.md` §3 step 5's citation-check mislabel (flagged, not
-  fixed, in D-045) is now corrected — attributes the fast-path
-  structural check to `guardrail.output_rail`, not
-  `citation_verifier.py`. §7 updated to state the actual sampling
-  temperature (0.7) and the new default.
-- **Sandbox observation, not a Fathom bug (not logged in debug.md, same
-  reasoning as Entry 005's curl/bash-profile note):** this sandbox was
-  initially missing `rank_bm25` as an installed dependency. That alone
-  wouldn't have been notable, except `unittest.mock.patch("rag.graph.
-  retrieve", ...)` silently swallowed the resulting `ModuleNotFoundError`
-  and re-raised it as a misleading `AttributeError: module 'rag' has no
-  attribute 'graph'` instead — worth remembering if that exact error
-  shows up again in a test run, since the real cause is almost
-  certainly a missing/broken dependency import inside the patched
-  module's import chain, not a genuinely missing attribute.
-- **B-018 (this session):** a real bug in
-  `verification/self_consistency.py`'s own number-extraction regex
-  (`\b` after `%` never matches), found and fixed during this session's
-  own test-writing — see `debug.md`. Not a regression in existing code.
-- **Regression status:** 180/180 across the full 12-file test suite
-  (added `test_phase6_answerability.py`, `test_phase6_self_consistency.py`,
-  `test_phase6_graph_wiring.py` this session; updated
-  `test_phase5_graph.py`'s scripted-reply sequences for the two new
-  model calls now in every agentic graph run). Zero regressions in
-  previously-passing behavior.
-- **B-011 through B-018 all confirmed/fixed** — B-018 is new this
-  session (see above), otherwise unchanged from Entry 027.
-- **Latency:** still an open, unresolved-cause variance question — see
-  D-029. Not re-investigated this session (though see the new
-  self-consistency cost question above, which is related but distinct).
-- **Next phase:** two legitimate, independent next steps, same as
-  before this session started: (1) real-hardware confirmation of this
-  session's Phase 6 work — specifically, run a query that should trigger
-  the `answerability_pre` short-circuit, one that shouldn't, and one
-  complex enough to exercise `self_consistency` for real, and report
-  timing + output for each; (2) macOS and Linux builds for Phase 8.
-- **Blockers:** none for the code itself. Real-hardware confirmation
-  needs an actual machine with the model downloaded (same as every
-  prior phase); macOS/Linux builds need those actual OSes per D-005.
+- **Active phase: Phase 9 — started.** Phase 6 and Phase 8 both closed
+  per user direction (Aug 24): Phase 6 legitimately meets its literal
+  exit criteria (citation accuracy metric established and tracked,
+  D-048/D-051); Phase 8's Windows track fully meets its Goal (D-044),
+  and macOS/Linux Tier 1 (build succeeds, launches, clean
+  ModelNotFoundError) is confirmed via D-053/D-054's GitHub Actions
+  run — Tier 2 (a real query end-to-end, matching Phase 8's full
+  stated Goal) has not been triggered yet, flagged as a still-open
+  detail but not blocking Phase 9 from starting.
+- **Phase 9 built this session (D-055/D-056):**
+  `src/installer_support/model_downloader.py` (streamed download,
+  atomic rename, checksum verification against a source pinned and
+  verified via web search — not guessed),
+  `src/installer_support/first_run_check.py` (actually loads the model
+  and generates, doesn't just check the file exists),
+  `src/main.py`'s `_ensure_model_available()` + `--ensure-model` flag
+  (one shared download flow instead of three platform-specific ones —
+  caught and fixed a real bug in my own Windows installer draft along
+  the way: it originally tried to trigger the download via `--help`,
+  which exits before the download code ever runs),
+  `build/windows/installer.iss`, `build/macos/postinstall.sh`,
+  `build/linux/install.sh`.
+- **`install.sh` is genuinely, functionally confirmed** on this real
+  Linux sandbox (copy/symlink/`--ensure-model` trigger all tested with
+  a stub binary, plus the error path) — stronger than a syntax check.
+  `installer.iss`/`postinstall.sh` are correct-per-spec but need real
+  Windows/macOS execution, same status as every platform-specific
+  script in this project before its real-hardware confirmation.
+- **Not yet done:** a real 2.5GB download has never actually happened
+  (no HF network access from this sandbox) — `model_downloader.py` is
+  tested with mocked `requests` only. Real compilation of
+  `installer.iss`, real `.pkg`-triggered run of `postinstall.sh`.
+- **UPDATE (D-057, real hardware):** the two biggest items above are
+  now CONFIRMED. Real ~2.38GB download completed, checksum matched
+  (the pinned SHA256 was correct), `first_run_check.py` confirmed
+  (load 48.4s, generation 7.6s), a real post-download query produced a
+  correctly grounded answer, and `installer.iss` compiled successfully
+  with real `ISCC.exe` (`fathom-setup.exe` produced). GitHub Actions
+  Tier 1 still green after all of Phase 9's commits. **Still open:**
+  actually running `fathom-setup.exe` (compiling ≠ running), Phase 8
+  Tier 2, and `postinstall.sh` on a real Mac.
 
----
+- **Everything below this point in earlier sessions' narrative has
+  been superseded by later entries in the Log below** (Entries
+  028-038) and was trimmed here to stop the top-of-file summary from
+  contradicting itself — the Log section is the accurate, complete
+  history; nothing there was deleted, only this stale top-level
+  restatement.
 
 ## Log (newest first)
+
+### Entry 040
+**Phase:** 9, first real-hardware confirmation
+**Action taken:** user ran the full Phase 9 sequence for real —
+forced a fresh ~2.38GB download (backed up the existing model first),
+`first_run_check.py`, a real post-download query, and compiled
+`installer.iss` with real `ISCC.exe`.
+**Real results:** the pinned SHA256 checksum from D-055 (sourced via
+web search, never locally verified until now) matched the real file —
+this was the single largest unconfirmed assumption in Phase 9 and it's
+now resolved. `first_run_check.py` passed for real (load 48.4s,
+generation 7.6s). A real query after the download produced a correctly
+grounded, cited answer. `installer.iss` compiled cleanly, producing
+`fathom-setup.exe`. GitHub Actions' Tier 1 build stayed green
+throughout all of Phase 9's commits landing on top of it.
+**Decisions logged this run:** D-057.
+**Regression status:** unchanged (no code changed this entry — pure
+real-hardware confirmation).
+**Still open:** `fathom-setup.exe` has been compiled but not run —
+compiling confirms syntax validity, not the actual install experience.
+Phase 8 Tier 2 (real macOS/Linux query) still not triggered.
+`postinstall.sh` still needs a real Mac.
+**Next action for next session:** run `fathom-setup.exe` on a Windows
+machine (ideally one without the model already cached, to genuinely
+test "clean install → working fathom command") and report the actual
+install experience — shortcut creation, the optional post-install
+download checkbox, and a real query run from the installed location.
+
+### Entry 039
+**Phase:** 9, started
+**Action taken:** user confirmed Phase 6 and Phase 8 closed and asked
+to start Phase 9. Flagged one honest gap first — Phase 8's own stated
+Goal includes "runs a query end-to-end," and only Tier 1 (build +
+model-free smoke test) has been confirmed on macOS/Linux so far, not
+Tier 2 — then proceeded, since Phase 9 doesn't depend on Tier 2 and
+Windows already has full confirmation.
+
+Built Phase 9's core pieces (D-055/D-056): `model_downloader.py`
+(pinned + verified source and checksum, streamed download, atomic
+rename, checksum verification), `first_run_check.py` (actually loads
+the model and generates, not just a file check), `main.py`'s
+`_ensure_model_available()` + new `--ensure-model` flag (one shared
+download flow instead of three platform-specific ones), and all three
+platform installer scripts.
+
+Caught and fixed a real bug in my own Windows installer draft:
+originally tried to trigger the post-install download via `fathom.exe
+--help`, which exits before any download code runs — added
+`--ensure-model` specifically to give installers a flag that actually
+works, rather than leaving the broken version in place.
+
+`install.sh` was functionally tested end-to-end on this real Linux
+sandbox (not just syntax-checked) — copy, symlink, and `--ensure-model`
+trigger all confirmed working through the installed symlink, plus the
+missing-source error path.
+
+Also cleaned up this file's "Current state" section — the pre-Phase-9
+narrative had accumulated multiple sessions' now-superseded status
+claims (an "ON HOLD" note that directly contradicted the new "closed"
+status just above it). Trimmed to a pointer at the Log below, which
+was never touched and remains the complete, accurate history.
+**Decisions logged this run:** D-055, D-056.
+**Regression status:** 288/288 across the full 18-file suite.
+**Not yet done:** a real download has never happened (no HF network
+access from this sandbox — mocked `requests` only in tests); real
+`ISCC.exe` compilation of `installer.iss`; real `.pkg`-triggered
+`postinstall.sh` run; Phase 8 Tier 2 still outstanding, independent of
+Phase 9's progress.
+**Next action for next session:** trigger a real download on real
+hardware (confirms `model_downloader.py` + `first_run_check.py` against
+the actual 2.5GB file and its real checksum for the first time);
+compile and run `installer.iss` on Windows; if a Mac becomes available,
+run `postinstall.sh` for real.
 
 ### Entry 029
 **Phase:** 6, follow-up to Entry 028

@@ -94,6 +94,17 @@ optimized per `trd.md` NFRs.
 GGUF with progress + checksum, verifies model loads before declaring success.
 **Exit criteria:** clean install → working `fathom` command on a
 machine with nothing pre-installed, on all three OSes.
+**Status (D-055/D-056, real-hardware confirmed D-057):** all five files
+built. `model_downloader.py`'s pinned checksum CONFIRMED CORRECT
+against a real ~2.38GB download; `first_run_check.py` CONFIRMED
+working (real load/generation timings on record); `installer.iss`
+CONFIRMED compiling with real `ISCC.exe`, producing `fathom-setup.exe`.
+Linux `install.sh` functionally tested end-to-end on a real Linux
+machine (this project's sandbox). **Still not done:** actually running
+`fathom-setup.exe` (compiling is necessary but not sufficient for the
+"clean install" exit criteria); macOS `postinstall.sh` still needs a
+real Mac. Exit criteria genuinely met on ZERO of three OSes yet — the
+closest is Windows, one step (running the compiled installer) short.
 
 ## Phase 10 — Evaluation, hardening, release prep
 **Files:** `tests/eval/golden_set.jsonl`, `tests/unit/*`

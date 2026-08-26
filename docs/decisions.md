@@ -1888,6 +1888,150 @@ citation_verifier parse failures (now instrumented, but needs one more
 real run to capture actual raw failure text); re-running the disagreement-
 concentration analysis with a 3rd data point before drawing any
 conclusion about leniency direction one way or the other.
+### D-055 — Phase 9 started: model download source pinned, checksum verified
+**Phase:** 9, prerequisite decision before any download code
+**Finding/Decision:** before writing `model_downloader.py`, pinned an
+exact, verified source rather than "whatever's current on the repo" --
+`unsloth/Qwen3-4B-Instruct-2507-GGUF`,
+`Qwen3-4B-Instruct-2507-Q4_K_M.gguf`. SHA256
+(`3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`)
+verified directly against Hugging Face's own file metadata via web
+search, not guessed and not computed locally (no way to download the
+real 2.5GB file in this sandbox to hash it directly). A checksum
+mismatch at download time means either a corrupted transfer or the
+upstream file changed out from under this pin -- either way, that's a
+loud failure (`ChecksumMismatchError`), never a silent "close enough."
+**Files touched:** `src/installer_support/model_downloader.py` (new).
+**Verification:** N/A -- source-pinning decision, not code.
+
+### D-056 — Phase 9: download-on-first-run architecture, one shared flow instead of three platform-specific downloaders
+**Phase:** 9
+**Finding/Decision:** considered building a separate frozen "installer
+helper" executable per OS (a small PyInstaller-packaged binary each
+installer would invoke to do the download) vs. having Fathom's own
+binary handle it on first launch. Chose the latter: `src/main.py`
+gained `_ensure_model_available()`, called right before `get_model()`,
+which checks `resolve_model_path().exists()` (cheap, no hashing --
+re-hashing a ~2.5GB file on every single launch would add real,
+unacceptable startup latency for the common case) and downloads only
+if missing. This means ONE download flow, covering both "installer
+triggers first launch" and "someone just unzipped the build and ran it
+manually" through the exact same code path, tested once
+(`test_phase9_*.py`) instead of three times across platform-specific
+scripts that would each need their own real-OS confirmation the way
+`build_macos.py`/`build_linux.py` did in Phase 8.
+
+Also added `--ensure-model`, a CLI flag that runs the download (or
+confirms it's already present) and exits, no query required --
+**caught and fixed a real bug in my own installer script while wiring
+this in**: the Windows `.iss` draft originally used `fathom.exe
+--help` to trigger the post-install download, which would never work,
+since `--help` exits via argparse before `_ensure_model_available()`
+ever runs. `--ensure-model` exists specifically so the installer
+scripts have a correct, dedicated way to do this rather than a
+workaround that silently wouldn't have worked.
+
+**Built, per phases.md's Phase 9 file list:**
+- `src/installer_support/model_downloader.py` -- streams the download
+  to a `.part` temp file, verifies SHA256, only `os.replace()`s into
+  the final path after the checksum passes (atomic on both POSIX and
+  Windows -- an interrupted/corrupted download must never leave a bad
+  file where `FathomModel` will later look for it). `verify_existing_
+  model()` lets a re-run skip re-downloading ~2.5GB when a valid copy
+  is already there, per `appflow.md` §7's update-flow spec.
+- `src/installer_support/first_run_check.py` -- actually LOADS the
+  model and runs one minimal generation, not just a file-exists check;
+  a checksum match only proves the bytes are correct, not that
+  `llama-cpp-python` can load them on this machine (wrong CPU
+  instruction set, OOM, etc.) or that a loaded model produces output at
+  all. Every failure mode returns a `FirstRunResult`, never raises --
+  the caller here is an installer, not a developer wanting a traceback.
+- `build/windows/installer.iss` -- Inno Setup script, per-user install
+  (no admin needed, matching where the model cache already lives),
+  optional post-install `--ensure-model` launch (unchecked by default
+  -- a ~2.5GB download is a real cost the user should consciously opt
+  into, not have sprung on them).
+- `build/macos/postinstall.sh` -- written to `pkgbuild`'s documented
+  postinstall contract, runs the download as the logged-in user (not
+  root -- the model cache lives under the user's home directory, so a
+  root-owned download would be unreadable by the user's own later
+  `fathom` runs).
+- `build/linux/install.sh` -- copies the `--onedir` build to
+  `~/.local/share/fathom`, symlinks into `~/.local/bin`, triggers
+  `--ensure-model`. **Actually functionally tested on this sandbox**
+  (it's real Linux) with a stub binary -- confirmed the copy, the
+  symlink, and the `--ensure-model` trigger all work correctly through
+  the installed symlink, plus the missing-source-directory error path.
+  This is real confirmation, not just a syntax check -- a stronger
+  claim than what's possible for the Windows/macOS scripts, which
+  genuinely need their native tools (`ISCC.exe`, `pkgbuild`) to verify.
+**Files touched:** `src/main.py` (`_ensure_model_available()`,
+`--ensure-model` flag), `src/installer_support/model_downloader.py`
+(new), `src/installer_support/first_run_check.py` (new),
+`build/windows/installer.iss` (new), `build/macos/postinstall.sh`
+(new), `build/linux/install.sh` (new), `test_phase9_model_downloader.py`
+(new, 19/19), `test_phase9_first_run_check.py` (new, 14/14),
+`test_phase9_ensure_model_available.py` (new, 13/13, including full
+CLI-level `--ensure-model` confirmation).
+**Verification:** 288/288 across the full 18-file regression suite.
+`install.sh` additionally functionally verified end-to-end on this
+real Linux sandbox (copy/symlink/trigger all confirmed working, plus
+the error path). `installer.iss` and `postinstall.sh` are written to
+their platforms' documented, correct syntax but NOT yet compiled/run
+on real Windows/macOS -- same "written correctly, not yet real-hardware
+confirmed" status as every other platform-specific script in this
+project until that happens.
+**Not yet done:** real compilation of `installer.iss` via `ISCC.exe`
+on Windows; real execution of `postinstall.sh` via an actual `.pkg`
+install on macOS; a real end-to-end download (this sandbox has no
+network access to Hugging Face, so `download_model()` is tested with
+mocked `requests` only -- the real 2.5GB transfer, checksum match
+against the real file, and `first_run_check.py`'s real model load have
+never actually happened).
+### D-057 — Phase 9 real confirmation: checksum verified correct, first_run_check confirmed, Windows installer compiles
+**Phase:** 9, first real-hardware run
+**Finding:** user ran the full Phase 9 sequence for real. Every piece
+that could only be confirmed with a real download or real Windows
+tooling is now confirmed:
+
+- **The pinned SHA256 checksum (D-055) is CONFIRMED CORRECT against
+  the real file.** A real ~2.38GB download completed
+  (`100.0% (2381MB / 2381MB)` -- close to the ~2.5GB estimate, the
+  estimate was always approximate) and `download_model()` printed
+  "Fathom: model is ready." -- which only happens after
+  `EXPECTED_SHA256` matches. Had the web-search-sourced hash been
+  wrong, this would have raised `ChecksumMismatchError` and deleted
+  the file instead. This was the single biggest unverified assumption
+  in D-055; it's now real, not sourced-but-unconfirmed.
+- **`first_run_check.py` confirmed for real:** `OK: Model loaded and
+  generated output successfully: 'hi'` -- `load: 48.4s, generation:
+  7.6s`. Real load time now on record (useful context for any future
+  startup-latency work against `trd.md`'s NFRs).
+- **A real query after the fresh download produced a correctly
+  grounded, cited answer** (transistor invention year, 1947, multiple
+  corroborating sources) -- confirms the download → first-run-check →
+  normal-operation sequence works end-to-end, not just each piece in
+  isolation.
+- **`installer.iss` compiles with real `ISCC.exe`:** "Successful
+  compile (48.578 sec)," produced `fathom-setup.exe`. Confirms the
+  Inno Setup syntax was actually valid, not just written to look
+  correct -- the `[Files]`, `[Icons]`, and `[Run]` sections all parsed
+  without error against the real `dist/windows/fathom/` build output.
+  **Not yet run** -- compiling is necessary but not sufficient; the
+  installer itself hasn't been executed to confirm the actual install
+  experience (file placement, Start Menu shortcut, the optional
+  `--ensure-model` post-install launch).
+- **GitHub Actions Tier 1 still green** after all of Phase 9's commits
+  landed on top of it (`Success`, 4m29s, 2 artifacts) -- confirms
+  nothing in this session's `citation_verifier.py`/`main.py` changes
+  broke the macOS/Linux build. Same two cosmetic Node.js 20 deprecation
+  warnings as before (GitHub Actions infra, not a Fathom issue).
+**Files touched:** none -- this is a real-hardware confirmation entry,
+not a code change.
+**Still open:** actually RUNNING `fathom-setup.exe` to confirm the
+install experience itself (not just that it compiles); Phase 8 Tier 2
+(a real macOS/Linux query, still not manually triggered); real
+`postinstall.sh` execution (still needs an actual Mac).
 
 ---
 **Return to `/context.md` for next steps.**

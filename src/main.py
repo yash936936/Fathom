@@ -40,7 +40,7 @@ from core.domain_gate import (
     quick_domain_check,
 )
 from core.guardrail import input_rail, output_rail
-from core.llm_backend import ModelNotFoundError, get_model
+from core.llm_backend import ModelNotFoundError, get_model, resolve_model_path
 from core.router import route
 from core.state import new_state
 from core.ui import Spinner, make_stage_reporter
@@ -51,6 +51,57 @@ from verification.answerability import check_answerability, refusal_message
 
 QUICK_MODE_MAX_TOKENS = 120  # tight cap -- see module docstring on why
 DEEP_MODE_MAX_TOKENS = 512
+
+
+def _ensure_model_available() -> None:
+    """Phase 9 (appflow.md §1, decisions.md D-055/D-056): if the
+    production model isn't at resolve_model_path() yet, download it
+    now, with a live progress line, before get_model() ever tries to
+    load it.
+
+    Deliberately does NOT re-verify an EXISTING file's checksum on
+    every launch -- installer_support/model_downloader.py's
+    download_model() already checksums right after downloading, and
+    hashing a ~2.5GB file on every single app invocation (not just the
+    first) would add real, unacceptable startup latency for the common
+    case where the model is already correctly in place. A cheap
+    existence check is enough to decide "already installed" for
+    day-to-day launches; full verification stays a download-time (or
+    explicit, on-demand) concern, not a per-launch one.
+
+    This single insertion point covers both the installer-triggered
+    first launch AND a user manually running `fathom` for the first
+    time without ever having run a separate installer step (e.g. a
+    developer running from source, or someone who just unzipped the
+    --onedir build) -- appflow.md's install-time download sequence and
+    "just run the binary" both funnel through the exact same code path,
+    on purpose, so there's only one download flow to maintain and test.
+    """
+    if resolve_model_path().exists():
+        return
+
+    from installer_support.model_downloader import ChecksumMismatchError, DownloadError, download_model
+
+    print(
+        "Fathom: downloading the model (one-time, ~2.5GB)...",
+        file=sys.stderr,
+    )
+
+    def _progress(downloaded: int, total: int) -> None:
+        pct = (downloaded / total * 100) if total else 0.0
+        mb_done = downloaded // (1024 * 1024)
+        mb_total = total // (1024 * 1024)
+        print(
+            f"\r  {pct:5.1f}%  ({mb_done}MB / {mb_total}MB)",
+            end="", file=sys.stderr, flush=True,
+        )
+
+    try:
+        download_model(progress_callback=_progress)
+    except (DownloadError, ChecksumMismatchError) as exc:
+        print(file=sys.stderr)  # end the in-progress \r line cleanly
+        raise RuntimeError(str(exc)) from exc
+    print(file=sys.stderr)  # newline after the final progress line
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,6 +163,19 @@ def build_parser() -> argparse.ArgumentParser:
         "real-hardware latency cost this is meant to help measure). "
         "No effect in --mode quick or on queries that route to the "
         "fast/simple path.",
+    )
+    parser.add_argument(
+        "--ensure-model",
+        action="store_true",
+        help="Download the model if it isn't already present, then "
+        "exit -- no query needed. Intended for installer scripts "
+        "(build/windows/installer.iss, build/macos/postinstall.sh, "
+        "build/linux/install.sh) to trigger the ~2.5GB download as an "
+        "explicit install-time step, and for anyone who wants to "
+        "pre-download without asking a question yet. Exits 0 if the "
+        "model is already present or downloads successfully, 2 on "
+        "failure -- same exit codes as a normal run's model-loading "
+        "failure path.",
     )
     return parser
 
@@ -332,6 +396,17 @@ def run_chat_loop(model, mode: str, max_tokens: int, top_k: int) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
+    if args.ensure_model:
+        # Handled BEFORE the "no query" check below -- --ensure-model
+        # is explicitly a no-query invocation, per its own help text.
+        try:
+            _ensure_model_available()
+        except RuntimeError as exc:
+            print(f"Fathom: {exc}", file=sys.stderr)
+            return 2
+        print("Fathom: model is ready.", file=sys.stderr)
+        return 0
+
     if not args.chat and not args.query:
         print('Fathom\nUsage: fathom "your research question" [--mode quick|deep] [--verbose] [--chat]', file=sys.stderr)
         return 1
@@ -341,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         max_tokens = QUICK_MODE_MAX_TOKENS if args.mode == "quick" else DEEP_MODE_MAX_TOKENS
 
     try:
+        _ensure_model_available()
         model = get_model()
     except (ModelNotFoundError, RuntimeError) as exc:
         print(f"Fathom: {exc}", file=sys.stderr)
