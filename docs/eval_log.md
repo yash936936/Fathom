@@ -29,3 +29,31 @@ tests/eval/citation_accuracy_eval.py`) and Qwen-vs-judge comparison
 runs (`python tests/eval/citation_accuracy_eval.py --with-judge`,
 D-049/D-050) — the comparison entries are headed "Qwen vs. Llama-3.1-8B
 judge comparison" so the two are easy to tell apart at a glance.
+
+### 2026-08-27 15:30 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 32 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 50.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 1/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-08-27 16:17 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 32 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 50.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-08-27 16:53 UTC
+**Hardware:** (unspecified)
+**Queries run:** 12 (0 errored)
+**Per-claim citation accuracy:** 100.0% (6 verified / 0 unverified / 17 unchecked)
+
+### 2026-08-27 18:00 UTC (Qwen vs. Llama-3.1-8B judge comparison, D-049)
+**Hardware:** (unspecified)
+**Queries run:** 12 (1 errored)
+**Qwen3-4B self-judged accuracy:** 52.6% (1 citation(s) left unchecked by Qwen's own call)
+**Llama-3.1-8B judge accuracy:** 42.1% (1 citation(s) left unchecked by the judge)
+**Agreement rate:** 57.9% (11 agree / 8 disagree)

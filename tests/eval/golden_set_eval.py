@@ -77,6 +77,9 @@ class GoldenSetResult:
     has_citations: bool
     has_low_confidence_caveat: bool
     flags: list[str]
+    answer: str = ""  # full answer text -- needed by
+    # judge_low_evidence_candidates() (D-060) to give the judge model
+    # actual content to assess, not just the derived boolean flags.
     error: str | None = None
 
 
@@ -178,7 +181,7 @@ def run_golden_set(
                     query=query, category=category, refused=refused, refusal_type=refusal_type,
                     has_citations=bool(_CITATION_TAG_PATTERN.search(answer)),
                     has_low_confidence_caveat=bool(_LOW_CONFIDENCE_CAVEAT_PATTERN.search(answer)),
-                    flags=flags,
+                    flags=flags, answer=answer,
                 )
             )
         except Exception as exc:  # noqa: BLE001 -- one bad query must not
@@ -246,6 +249,115 @@ def append_to_log(golden_report: GoldenSetReport, hardware_note: str = "(unspeci
         f.write(entry)
 
 
+@dataclass
+class HallucinationRiskVerdict:
+    query: str
+    answer: str
+    overconfident: bool  # judge's opinion, per _JUDGE_PROMPT below
+    reasoning: str
+    error: str | None = None
+
+
+_JUDGE_PROMPT = """You are assessing whether a research assistant's \
+answer makes confident, specific factual claims WITHOUT any citation, \
+source, or acknowledgment of uncertainty. This is not asking whether \
+the claims are true or false -- you have no way to check that either. \
+You are assessing the answer's OWN epistemic posture: does it read as \
+confidently asserting things as fact with no indication of where the \
+information came from or how certain it is?
+
+Respond with ONLY a JSON object, no other text:
+{"overconfident": true or false, "reasoning": "one short sentence"}
+"""
+
+
+def judge_low_evidence_candidates(
+    candidates: list[GoldenSetResult],
+    judge_model,
+) -> list[HallucinationRiskVerdict]:
+    """Independent second opinion on the review candidates already
+    flagged by the citation/caveat heuristic (see module docstring's
+    honesty note -- that heuristic is crude, a pure presence check).
+    This asks a genuinely different, stronger model to actually READ
+    the answer and assess its epistemic posture, rather than just
+    pattern-matching for a citation tag or a "[Note:" caveat.
+
+    Still NOT a hallucination detector -- same honesty constraint as
+    everywhere else in this module. The judge model has no more access
+    to ground truth than the heuristic does; what it adds is an actual
+    reading of the answer's content and tone, which a regex cannot do
+    at all. A verdict here is a second, better-informed opinion to
+    weigh alongside the heuristic flag, not a final determination.
+    """
+    verdicts = []
+    for candidate in candidates:
+        try:
+            raw = judge_model.chat(
+                messages=[
+                    {"role": "system", "content": _JUDGE_PROMPT},
+                    {"role": "user", "content": f"Question: {candidate.query}\n\nAnswer: {candidate.answer}"},
+                ],
+                max_tokens=100,
+                temperature=0.0,
+            )
+            start = raw.index("{")
+            end = raw.rindex("}") + 1
+            parsed = json.loads(raw[start:end])
+            verdicts.append(
+                HallucinationRiskVerdict(
+                    query=candidate.query,
+                    answer=candidate.answer,
+                    overconfident=bool(parsed["overconfident"]),
+                    reasoning=str(parsed.get("reasoning", "")),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 -- a judge parse failure
+            # on one candidate must not discard the others' verdicts,
+            # same reasoning as every other eval tool's per-item error
+            # handling in this project.
+            verdicts.append(
+                HallucinationRiskVerdict(
+                    query=candidate.query, answer=candidate.answer,
+                    overconfident=False, reasoning="", error=str(exc),
+                )
+            )
+    return verdicts
+
+
+def format_hallucination_verdicts(verdicts: list[HallucinationRiskVerdict]) -> str:
+    lines = ["Judge's independent assessment of low-evidence review candidates:"]
+    for v in verdicts:
+        if v.error is not None:
+            lines.append(f"  ERROR  {v.query!r}: {v.error}")
+        else:
+            flag = "OVERCONFIDENT" if v.overconfident else "judge disagrees with heuristic flag"
+            lines.append(f"  [{flag}] {v.query!r} -- {v.reasoning}")
+    n_confirmed = sum(1 for v in verdicts if v.error is None and v.overconfident)
+    n_total = sum(1 for v in verdicts if v.error is None)
+    lines.append("")
+    lines.append(
+        f"Judge agrees with the heuristic flag on {n_confirmed}/{n_total} candidates. "
+        f"Still not confirmed hallucinations -- this is a second model's opinion, "
+        f"not ground truth, on candidates a citation/caveat heuristic already flagged."
+    )
+    return "\n".join(lines)
+
+
+def append_hallucination_verdicts_to_log(verdicts: list[HallucinationRiskVerdict], hardware_note: str = "(unspecified)") -> None:
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    n_confirmed = sum(1 for v in verdicts if v.error is None and v.overconfident)
+    n_total = sum(1 for v in verdicts if v.error is None)
+    entry = (
+        f"\n### {timestamp} (Golden set hallucination-risk judge review, D-060)\n"
+        f"**Hardware:** {hardware_note}\n"
+        f"**Candidates reviewed:** {len(verdicts)}\n"
+        f"**Judge agrees with heuristic flag:** {n_confirmed}/{n_total} "
+        f"(second opinion, NOT confirmed hallucinations)\n"
+    )
+    with open(_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
 def main() -> int:
     from core.llm_backend import get_model, ModelNotFoundError
 
@@ -263,5 +375,54 @@ def main() -> int:
     return 0
 
 
+def main_with_judge() -> int:
+    """--with-judge: after the normal golden-set run, if there are any
+    low_evidence_review_candidates, load the eval judge (D-049/D-050,
+    Llama-3.1-8B) and get its independent read on each one. Sequential
+    loading -- Qwen freed via del + gc.collect() before the judge loads
+    -- same reasoning as citation_accuracy_eval.py's main_with_judge()
+    and the same <6GB hardware constraint (D-049).
+    """
+    import gc
+
+    from core.llm_backend import get_model, ModelNotFoundError
+    from judge_model import JudgeModel, JudgeModelNotFoundError
+
+    try:
+        model = get_model()
+    except (ModelNotFoundError, RuntimeError) as exc:
+        print(f"golden_set_eval --with-judge: {exc}", file=sys.stderr)
+        return 2
+
+    entries = load_golden_set()
+    golden_report = run_golden_set(entries, model, report=lambda msg: print(msg, file=sys.stderr))
+    print(format_report(golden_report))
+    append_to_log(golden_report)
+
+    candidates = golden_report.low_evidence_review_candidates
+    if not candidates:
+        print("\nNo low-evidence review candidates this run -- nothing for the judge to assess.")
+        return 0
+
+    del model
+    gc.collect()
+    print(f"\nFreed Qwen3-4B, loading judge model to review {len(candidates)} candidate(s)...", file=sys.stderr)
+
+    try:
+        judge_model = JudgeModel()
+    except JudgeModelNotFoundError as exc:
+        print(f"golden_set_eval --with-judge: {exc}", file=sys.stderr)
+        return 2
+
+    verdicts = judge_low_evidence_candidates(candidates, judge_model)
+    print()
+    print(format_hallucination_verdicts(verdicts))
+    append_hallucination_verdicts_to_log(verdicts)
+    print(f"\nLogged to {_LOG_PATH}")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--with-judge" in sys.argv:
+        sys.exit(main_with_judge())
     sys.exit(main())

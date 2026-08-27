@@ -2130,6 +2130,67 @@ other eval tool in this project before its first real-hardware
 execution. 32 entries is a starting set, not `trd.md` §7's full 50-100
 -- expandable once real-run data shows which categories need more
 coverage.
+### D-060 — Integrated the eval-time judge (Llama-3.1-8B) into golden_set_eval.py's hallucination-risk check
+**Phase:** 10
+**Finding/Decision:** the "zero silent hallucination" heuristic in
+`golden_set_eval.py` (D-059) was a pure presence check -- flags a
+`low_evidence` answer as a review candidate if it has neither a
+citation tag nor a low-confidence caveat. At the user's request,
+extended this with a genuine second opinion from the same eval-time
+judge model D-049/D-050 built (Llama-3.1-8B, `tests/eval/
+judge_model.py`) -- NOT to replace the heuristic, but to give an
+actual independent reading of the answer's content and epistemic
+posture, which a regex fundamentally cannot do.
+
+**Same honesty discipline as everywhere else in this eval tooling,
+stated explicitly and enforced in the output, not just claimed:** the
+judge has no more access to ground truth than the heuristic does.
+What it adds is that it actually READS the answer and assesses
+whether it presents unsupported claims with unwarranted confidence --
+a qualitative judgment, not a fact-check. `format_hallucination_
+verdicts()` and the `eval_log.md` entry both state explicitly "NOT
+confirmed hallucinations" and "second model's opinion, not ground
+truth" -- this is a stronger second look, never upgraded to a
+detector.
+
+**Added:** `judge_low_evidence_candidates()` (takes the already-
+flagged candidates, asks the judge model to assess each one's
+epistemic posture), `HallucinationRiskVerdict`, `format_
+hallucination_verdicts()`, `append_hallucination_verdicts_to_log()`,
+and `main_with_judge()` (new `--with-judge` flag on `golden_set_eval.py`
+-- sequential loading, same pattern and same <6GB reasoning as
+`citation_accuracy_eval.py`'s `main_with_judge()`: Qwen runs the full
+golden set first, gets explicitly freed via `del` + `gc.collect()`,
+THEN the judge loads to review only the flagged candidates, never both
+resident at once).
+
+**A real, useful finding surfaced while testing this, not a bug in the
+new code:** `core/guardrail.py`'s `output_rail` already blocks a
+confidently-stated, zero-citation answer whenever real chunks were
+retrieved (`require_citations=True` in that case) -- replacing it with
+the generic safety-fallback message before it could ever reach this
+heuristic. Discovered because an early test draft tried to script
+exactly that scenario through the real pipeline and got the generic
+fallback message back instead. This is CORRECT, reassuring production
+behavior, not a gap -- it means the actual hallucination-risk surface
+in the fast path is narrower than "no citations at all" would suggest;
+a more subtle real risk (a citation tag present but only weakly
+supporting the claim) is what `citation_verifier.py`'s entailment
+check exists to catch on the agentic path. Logged here rather than
+silently worked around, since it's a genuine piece of information
+about how the guardrails actually interact.
+**Files touched:** `tests/eval/golden_set_eval.py`,
+`test_phase10_golden_set_eval.py` (+10 checks; also fixed two
+pre-existing test bugs found in the same pass -- `patch("rag.graph.
+retrieve", ...)` alone doesn't cover `main.py`'s own directly-imported
+`retrieve` reference, needed for fast-path-routed test queries, same
+class of fixture issue hit several times earlier this session).
+**Verification:** 314/314 across the full 19-file regression suite.
+**Not yet done:** no real run of `--with-judge` on `golden_set_eval.py`
+specifically -- same standing gap as every eval tool before its first
+real-hardware execution, though `citation_accuracy_eval.py --with-judge`
+(the sibling tool built on the same `JudgeModel`) has already been
+confirmed working for real (D-051).
 
 ---
 **Return to `/context.md` for next steps.**

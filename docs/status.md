@@ -7,7 +7,7 @@
 ---
 
 ## Current state
-- **Active phase: Phase 10 — started (D-059).** Built `tests/eval/
+- **Active phase: Phase 10 — started (D-059), judge integration added (D-060).** Built `tests/eval/
   golden_set.jsonl` (32 entries, 4 categories) and `tests/eval/
   golden_set_eval.py`, scoped specifically to the two `prd.md` §5
   success criteria nothing previously covered: off-domain refusal rate
@@ -16,6 +16,13 @@
   to detect hallucination directly). Citation accuracy and the <6GB
   constraint are already covered elsewhere (Phase 6's eval harness,
   and an architectural property respectively) — not duplicated here.
+  Added `--with-judge`: the Llama-3.1-8B eval judge (D-049/D-050) now
+  gives an independent second opinion on any flagged `low_evidence`
+  candidates — genuine content assessment, not a regex, still
+  explicitly labeled "not confirmed hallucinations" throughout.
+  Testing this surfaced a real, reassuring finding: `output_rail`
+  already blocks confident zero-citation answers when chunks exist,
+  narrowing the fast path's actual hallucination-risk surface.
   **No real run yet** — same standing gap as every eval tool before
   its first real-hardware execution.
 - **Phase 9 — started, Windows track fully closed.** Phase 6 and Phase 8 both closed
@@ -70,6 +77,37 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 043
+**Phase:** 10, judge integration
+**Action taken:** user asked to integrate the eval-time judge (Llama-
+3.1-8B, D-049/D-050) into `golden_set_eval.py`, on top of the citation-
+comparison use it already had in `citation_accuracy_eval.py`. Added
+`--with-judge`: after the normal golden-set run, the judge
+independently reviews any `low_evidence` review candidates the
+citation/caveat heuristic flagged, actually reading the answer's
+content to assess its epistemic posture rather than pattern-matching.
+Same sequential-loading pattern as the sibling tool (Qwen freed before
+the judge loads). Same honesty discipline throughout — explicitly
+labeled "not confirmed hallucinations," a second opinion, not a
+detector.
+
+While writing the test for this, found a real (and reassuring)
+production behavior, not a bug: `output_rail` already blocks a
+confident zero-citation answer whenever real chunks were retrieved,
+before it could ever reach this heuristic. Also found and fixed two
+pre-existing test bugs in the process — `patch("rag.graph.retrieve",
+...)` alone doesn't cover `main.py`'s own directly-imported `retrieve`
+reference, needed for fast-path-routed queries.
+**Decisions logged this run:** D-060.
+**Regression status:** 314/314 across the full 19-file suite.
+**Not yet done:** no real run of `golden_set_eval.py --with-judge`
+specifically, though the underlying `JudgeModel` machinery it reuses
+has already been confirmed working for real via `citation_accuracy_
+eval.py --with-judge` (D-051).
+**Next action for next session:** run `golden_set_eval.py` (plain,
+then `--with-judge`) on real hardware alongside the citation eval
+re-runs already queued from Entry 042.
 
 ### Entry 042
 **Phase:** 10, started
