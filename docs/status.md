@@ -78,6 +78,92 @@
 
 ## Log (newest first)
 
+### Entry 045
+**Phase:** 6/10, D-061's three findings root-caused and closed (Windows; macOS/Linux held per user request)
+**Action taken:** debugged all three D-061 findings by reading the actual code, not guessing from symptoms.
+
+**Fixed (2 of 3):**
+- `n_ctx` overflow (3 independent real crashes): root cause was
+  `rag/synthesis.py`'s `_format_sources()` embedding full, untruncated
+  chunk content — `citation_verifier.py` already truncated to 300
+  chars/claim, synthesis never did. Fixed with a 2000-char/chunk cap,
+  budget math documented inline.
+- False-premise catch rate under-counted at 50%: root cause was
+  `golden_set_eval.py`'s classifier recognizing only 2 of the 4 ways a
+  query gets safely handled (missing `output_rail`'s fallback and
+  `generate()`'s honest zero-evidence fallback). This is the exact
+  same chain as the Eiffel Tower query back in Entry 033/034 — an
+  ambiguous answerability verdict fails open to synthesis, which
+  produces an uncited answer, which `output_rail` correctly blocks —
+  a SAFE outcome that was being scored as a failure. Fixed: classifier
+  now recognizes all four outcomes distinctly.
+
+**Corrected, not just fixed:** while fixing the classifier, confirmed
+by reading the actual code (not assuming) that `output_rail` runs
+unconditionally after BOTH the fast and agentic paths in
+`main.run_query()` — D-060's claim that it only "narrows" the fast
+path's risk surface was understated. For `golden_set_eval.py`'s real
+pipeline specifically, an uncited answer with real chunks present is
+structurally unreachable, not just unlikely. Updated the test
+accordingly (unit-level test against a manually constructed result,
+since no real pipeline path reaches this scenario to integration-test
+against).
+
+**Investigated, found NOT a bug (3rd finding):** the CRISPR
+zero-citation case. Root cause: `sufficiency` correctly identified
+across all 3 retries that 20 real chunks/attempt were topically
+adjacent but not substantively definitional — none of Fathom's five
+retrieval tools suit "what is X" foundational questions. The system
+correctly refused rather than fabricate a definition. A real fix would
+be a feature decision (an encyclopedic retrieval tool) — flagged, not
+implemented without discussion.
+**Decisions logged this run:** D-062.
+**Regression status:** 325/325 across the full 19-file suite.
+**Scope:** Windows only, per explicit user instruction — macOS/Linux
+held pending hardware access. Fixes are pure Python, platform-agnostic
+code, so they'll apply equally once macOS/Linux testing resumes.
+**Not yet done:** none of these three fixes have run on real hardware
+yet — sandbox-verified against reconstructions of the actual failure
+patterns only.
+**Next action for next session:** confirm all three fixes on real
+Windows hardware — re-run the exact same sequence from D-061 (plain +
+`--with-judge` golden set, plain + `--with-judge` citation eval) and
+check the ISS query no longer crashes, the false-premise catch rate is
+now accurate, and decide whether to pursue an encyclopedic retrieval
+tool for the CRISPR-class gap.
+
+### Entry 044
+**Phase:** 6/10, third real run — new actionable findings
+**Action taken:** user ran the full sequence for real: plain golden
+set, `--with-judge` golden set, plain citation eval, `--with-judge`
+citation eval. Network was down for the first ~5 minutes (DNS
+resolution failures) — not a Fathom bug; pipeline degraded gracefully
+throughout, never crashed, recovered automatically.
+**Real findings:**
+- Golden set false-premise catch rate: **50%** — 3 of 6 false-premise
+  queries not correctly refused. Most actionable result of this run.
+- Off-domain refusal 100% (exceeds prd.md's 95% threshold), answerable
+  false-positive rate 0% — both clean.
+- Real evidence sometimes still produces zero citations even without
+  any network issue (CRISPR query: 20 real chunks on attempt 1, still
+  `answerable=False`, 0/0/0 citations) — a cleaner version of the
+  long-standing Entry 034/035 mystery. Scoped: this ran through the
+  forced-agentic eval harness which bypasses `output_rail`; a real
+  end-user query would have been caught by the safety fallback instead.
+- `n_ctx` overflow on the ISS query recurred a THIRD time (8724 tokens
+  this run, vs. 9381 and 8389 before) — no longer a fluke.
+- Qwen-vs-judge leniency direction still genuinely mixed this run (2
+  each direction) — continues to support D-054's correction.
+**Decisions logged this run:** D-061.
+**Regression status:** unchanged — findings-only entry, no code
+changed.
+**Next action for next session:** decide which of the above to
+prioritize. The `n_ctx` overflow has the strongest case for an
+immediate fix (three independent confirmations, same failure class).
+The false-premise 50% catch rate and the zero-citation-despite-
+evidence pattern both need more investigation before a fix can be
+designed — neither has an obvious root cause from the data alone yet.
+
 ### Entry 043
 **Phase:** 10, judge integration
 **Action taken:** user asked to integrate the eval-time judge (Llama-

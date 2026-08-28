@@ -72,17 +72,25 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retriev
     check("false_premise refusal type is 'answerability', distinct from domain", report3.results[0].refusal_type == "answerability")
     check("false_premise_catch_rate computed correctly", report3.false_premise_catch_rate == 1.0)
 
-# --- Test 4: low_evidence query with no citations, no caveat -> flagged as review candidate ---
-with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retrieve", side_effect=fake_retrieve):
-    entries4 = [{"query": "Tell me about the transistor with total confidence", "category": "low_evidence"}]
-    model4 = StubModel([
-        '{"in_domain": true, "confidence": 0.9, "reason": ""}',
-        '{"answerable": true, "confidence": 0.9, "reason": ""}',
-        "This is definitely true with total confidence, no sources needed.",  # no citations, no caveat -- the risky case
-    ])
-    report4 = run_golden_set(entries4, model4)
-    candidates = report4.low_evidence_review_candidates
-    check("uncited, uncaveated low_evidence answer flagged as review candidate", len(candidates) == 1)
+# --- Test 4 (CORRECTED per a real discovery made while writing this
+# test: output_rail actually runs UNCONDITIONALLY after BOTH the fast
+# and agentic branches in main.run_query() -- not fast-path-only as
+# D-060 first stated. This means an uncited answer with real chunks
+# present is structurally UNREACHABLE through golden_set_eval.py's
+# real pipeline (run_golden_set uses main.run_query()), not just
+# unlikely. See decisions.md D-062 for the corrected finding. This
+# test therefore exercises the property's LOGIC directly against a
+# manually constructed result, the same pattern already used for the
+# judge-assessment tests below -- there is no real pipeline path that
+# reaches this scenario to integration-test against.) ---
+manual_review_candidate = GoldenSetResult(
+    query="Tell me about the transistor with total confidence",
+    category="low_evidence", refused=False, refusal_type=None,
+    has_citations=False, has_low_confidence_caveat=False, flags=[],
+    answer="This is definitely true with total confidence, no sources needed.",
+)
+manual_report = GoldenSetReport(results=[manual_review_candidate])
+check("uncited, uncaveated low_evidence answer flagged as review candidate (unit-level -- unreachable via the real pipeline, see D-062)", len(manual_report.low_evidence_review_candidates) == 1)
 
 # --- Test 4b: low_evidence query WITH a citation -> NOT flagged (has grounding) ---
 with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retrieve", side_effect=fake_retrieve):
@@ -95,6 +103,27 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retriev
     report4b = run_golden_set(entries4b, model4b)
     check("cited low_evidence answer is NOT flagged as a review candidate", len(report4b.low_evidence_review_candidates) == 0)
 
+# --- Test 4c (D-062): the HONEST zero-evidence fallback must NOT be
+# flagged as a hallucination-risk candidate -- it's the opposite of a
+# risk, it's the most truthful possible response to missing evidence.
+# Distinguishing this from output_rail's fallback is the whole point
+# of the "zero_evidence" refusal_type. ---
+def fake_retrieve_empty(query, tool_names=None, max_results_per_tool=5, debug_report=None):
+    return []
+
+with patch("rag.graph.retrieve", side_effect=fake_retrieve_empty), patch("main.retrieve", side_effect=fake_retrieve_empty):
+    entries4c = [{"query": "Some totally unfindable obscure thing", "category": "low_evidence"}]
+    model4c = StubModel([
+        '{"in_domain": true, "confidence": 0.9, "reason": ""}',  # domain_gate
+        '{"answerable": true, "confidence": 0.9, "reason": ""}',  # answerability still runs with chunks=[] --
+        # it's a meaningful input (checks the query alone), not a skip condition.
+    ])  # generate() itself short-circuits on the empty chunks list before calling
+    # model.chat() again -- that's the zero-evidence fallback under test.
+    report4c = run_golden_set(entries4c, model4c)
+    check("D-062: honest zero-evidence fallback is classified as refused", report4c.results[0].refused is True)
+    check("D-062: refusal_type correctly identifies zero_evidence, distinct from output_rail", report4c.results[0].refusal_type == "zero_evidence")
+    check("D-062: honest zero-evidence fallback is NOT flagged as a hallucination-risk candidate", len(report4c.low_evidence_review_candidates) == 0)
+
 # --- Test 5: a query that errors doesn't kill the whole run ---
 class ExplodingModel:
     def chat(self, *a, **k):
@@ -104,6 +133,26 @@ entries5 = [{"query": "will fail", "category": "answerable"}]
 report5 = run_golden_set(entries5, ExplodingModel())
 check("errored query recorded, not raised", len(report5.errors) == 1)
 check("errored query excluded from answerable_false_positive_refusal_rate (no entries)", report5.answerable_false_positive_refusal_rate is None)
+
+# --- Test 6 (D-062, found on real hardware -- status.md Entry 044):
+# a false_premise query whose answerability check is AMBIGUOUS (not a
+# confident refusal) proceeds to synthesis per D-045's fail-open
+# design; if synthesis then produces a no-citation answer,
+# output_rail correctly intercepts it with the generic safety
+# fallback. This IS a safe outcome and must be classified as refused
+# -- missing this was the real root cause of golden_set_eval.py
+# under-counting the false-premise catch rate on real data. ---
+with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retrieve", side_effect=fake_retrieve):
+    entries6 = [{"query": "Why did the transistor get banned in 1960?", "category": "false_premise"}]
+    model6 = StubModel([
+        '{"in_domain": true, "confidence": 0.9, "reason": ""}',  # passes domain_gate
+        '{"answerable": false, "confidence": 0.3, "reason": "no such ban occurred"}',  # AMBIGUOUS (low confidence) -- does NOT short-circuit
+        "There was indeed such a ban, according to general knowledge.",  # synthesis produces a NO-CITATION answer
+    ])
+    report6 = run_golden_set(entries6, model6)
+    check("D-062: ambiguous-answerability + no-citation answer IS correctly classified as refused (via output_rail)", report6.results[0].refused is True)
+    check("D-062: refusal_type correctly identifies output_rail as the mechanism, distinct from domain/answerability", report6.results[0].refusal_type == "output_rail")
+    check("D-062: false_premise_catch_rate now correctly counts this as caught", report6.false_premise_catch_rate == 1.0)
 
 # --- Test 6: format_report doesn't crash on an empty report, includes the prd.md threshold ---
 empty = GoldenSetReport()

@@ -2191,6 +2191,140 @@ specifically -- same standing gap as every eval tool before its first
 real-hardware execution, though `citation_accuracy_eval.py --with-judge`
 (the sibling tool built on the same `JudgeModel`) has already been
 confirmed working for real (D-051).
+### D-061 — Third real run: false-premise catch rate 50%, n_ctx overflow recurred a 3rd time, real evidence sometimes still produces zero citations
+**Phase:** 6/10, real-hardware run
+**Finding:** user ran the full sequence (plain golden set, `--with-judge` golden set, plain citation eval, `--with-judge` citation eval). Network was down (DNS resolution failures) for roughly the first 5 minutes of the run -- not a Fathom bug; the pipeline degraded gracefully throughout (never crashed, always produced some response) and recovered automatically once connectivity returned.
+
+**Real findings, independent of the network issue:**
+1. **Golden set false-premise catch rate: 50.0%.** 3 of 6 false-premise
+   queries were NOT correctly refused. This is the single most
+   actionable result from this run -- it bears directly on "zero
+   silent hallucination" (an unrecognized false premise, confidently
+   answered, IS a hallucination by definition). Off-domain refusal
+   (100%, exceeds the 95% `prd.md` threshold) and the answerable
+   false-positive rate (0%) were both clean.
+2. **Real evidence sometimes still produces zero citations.** Query 6
+   (CRISPR) retrieved 20 real chunks on the FIRST attempt -- no
+   network issue -- and still ended `answerable=False`,
+   `0 verified/0 unverified/0 unchecked`. This is a cleaner
+   demonstration of the Entry 034/035 mystery than any prior run: it
+   can no longer be explained away as "no chunks were ever retrieved."
+   Important scoping note: this ran through
+   `citation_accuracy_eval.py`'s forced-agentic `run_agentic()` call,
+   which deliberately bypasses `output_rail` (D-048) -- a real
+   end-user query through `main.run_query()` would have caught a
+   zero-citation answer and shown the safe fallback instead. This
+   finding is about synthesis's own citation-instruction adherence,
+   not necessarily something reaching real users.
+3. **The `n_ctx` overflow recurred a THIRD time**, same query (ISS),
+   different token count (8724 this time vs. 9381 and 8389
+   previously). Three independent real runs, same failure class. No
+   longer arguable as a fluke -- this is the clearest case yet for
+   prioritizing the truncation-strategy fix flagged as far back as
+   Entry 034 and never addressed.
+4. **Qwen-vs-judge leniency direction remains genuinely mixed** (2
+   "Qwen more lenient," 2 "judge more lenient" this run) -- continues
+   to support D-054's correction of D-052's earlier one-directional
+   framing.
+**Files touched:** none yet -- this is a findings-only entry; no fix
+has been chosen or implemented for any of the above.
+**Verification:** N/A -- real-hardware data, not a code change.
+**Still open, now with more evidence than before:** the false-premise
+50% catch rate and the "real evidence, zero citations" pattern both
+need further investigation before a fix is designed -- neither has an
+obvious root cause yet from the data alone. The `n_ctx` overflow does
+have enough repeated evidence now to justify prioritizing a fix.
+### D-062 — Root-caused and fixed 2 of 3 D-061 findings; 3rd confirmed as correct safety behavior, not a bug
+**Phase:** 6/10, closing D-061's findings for Windows (macOS/Linux held per user request, no hardware available)
+**Finding/Decision:** debugged all three D-061 findings by reading code, not guessing from symptoms.
+
+**Fix 1 — `n_ctx` overflow (3 independent real crashes, same failure class).**
+Root cause confirmed by code inspection: `citation_verifier.py`
+already truncates chunk content to 300 chars/claim, but
+`rag/synthesis.py`'s `_format_sources()` embedded FULL, UNTRUNCATED
+chunk content with no bound at all. With `top_k=8` real chunks (news
+articles, web pages -- routinely several thousand characters each),
+the synthesis prompt could exceed `DEFAULT_N_CTX=8192` outright,
+crashing `generate()` before it could even attempt a response. Fixed:
+added `_MAX_CHUNK_CHARS=2000` truncation in `_format_sources()`, with
+the budget math shown in the constant's own comment (n_ctx minus
+`DEEP_MODE_MAX_TOKENS`, minus system prompt/query/conversation-context
+margin, divided across `top_k` chunks, with real headroom left for
+tokenizer-estimate imprecision). Confirmed structurally against the
+real ISS-query crash pattern (top_k=8 chunks accumulated across 3
+retries, several of them long real web/news content).
+
+**Fix 2 — golden set under-counting the false-premise catch rate.**
+Root cause confirmed by code inspection, not assumption:
+`golden_set_eval.py`'s `_classify_result()` only recognized TWO of the
+FOUR distinct ways a query gets safely handled without an ungrounded
+answer reaching the user (`domain_gate` refusal, `answerability`
+refusal). It was missing:
+  - `output_rail`'s generic fallback -- reachable when an AMBIGUOUS
+    (low-confidence) answerability verdict fails open to synthesis per
+    D-045's design, and synthesis then produces an uncited answer;
+    `output_rail` correctly intercepts it. This exact chain (ambiguous
+    answerability -> synthesis -> uncited answer -> output_rail
+    fallback) is precisely what happened to the Eiffel Tower query
+    back in status.md Entry 033/034 -- a SAFE outcome that was being
+    scored as a false-premise-catch FAILURE.
+  - `rag/synthesis.generate()`'s own hardcoded zero-chunk fallback ("I
+    wasn't able to find any sources...") -- an HONEST "no evidence"
+    response, also being under-counted.
+Fixed: `_classify_result()` now recognizes all four cases distinctly
+(`"domain"`, `"answerability"`, `"output_rail"`, `"zero_evidence"`).
+
+**A real, corrected discovery made WHILE fixing #2, not assumed going
+in:** `main.run_query()`'s `output_rail` call runs UNCONDITIONALLY
+after BOTH the fast and agentic branches (confirmed by reading the
+actual code, not assumed) -- meaning D-060's claim that `output_rail`
+only "narrows" the fast path's hallucination-risk surface was
+UNDERSTATED. For any query routed through `main.run_query()` (which is
+what `golden_set_eval.py` uses), an uncited answer with real chunks
+present is structurally UNREACHABLE, not just unlikely -- `output_rail`
+eliminates that specific risk surface entirely for this entry point.
+`low_evidence_review_candidates` is therefore, correctly, dead code
+against `golden_set_eval.py`'s real pipeline specifically; kept as a
+defensive property and now tested at the unit level (a manually
+constructed `GoldenSetResult`) rather than forced through an
+integration test that cannot actually reach it. D-060's text left
+uncorrected in place; this entry supersedes its specific claim.
+
+**Finding 3 — CRISPR query, real evidence, zero citations: NOT a bug.**
+Root cause: `sufficiency` correctly identified, across all 3 retry
+attempts, that the 20 real chunks retrieved per attempt (news
+articles, GitHub repos, arXiv papers) were topically adjacent to
+"CRISPR" but not substantively DEFINITIONAL -- none of Fathom's five
+retrieval tools (web/news/arxiv/curated/github) are suited to "what is
+X" foundational questions; they skew toward news, research, and code.
+`sufficiency` and `answerability` correctly refused to fabricate a
+definition from ill-fitting sources rather than hallucinate one. This
+is the safety mechanism working AS DESIGNED, not a defect. A genuine
+fix would be a FEATURE decision (e.g. adding a Wikipedia-style
+encyclopedic retrieval tool) -- explicitly not implemented here without
+discussing it first; flagged as a real, identified gap for a future
+decision, not silently patched.
+**Files touched:** `src/rag/synthesis.py` (`_MAX_CHUNK_CHARS`,
+`_format_sources()`), `tests/eval/golden_set_eval.py`
+(`_classify_result()`, `_OUTPUT_RAIL_FALLBACK_PREFIX`,
+`_ZERO_EVIDENCE_PREFIX`), `test_phase4_manual.py` (+5 checks for the
+truncation fix, including an 8-chunk realistic-worst-case
+reconstruction of the actual crash pattern), `test_phase10_golden_set_
+eval.py` (+3 checks reproducing the exact real-hardware Eiffel-Tower-
+class scenario, and corrected Test 4 to unit-test the now-provably-
+unreachable-via-real-pipeline scenario directly rather than force an
+impossible integration test).
+**Verification:** 325/325 across the full 19-file regression suite.
+**Scope, per explicit user instruction:** Windows only. macOS and
+Linux held -- no hardware available; will revisit once a device exists
+for either. None of these three fixes are Windows-specific in their
+code (they're pure Python, platform-agnostic), so they apply equally
+once macOS/Linux testing resumes -- "Windows only" describes what's
+been CONFIRMED, not a platform-conditional code path.
+**Not yet done:** none of these three fixes have been run on real
+hardware yet -- sandbox-verified against reconstructions of the actual
+real-hardware failure patterns, same standing gap as everything else
+in this project before its first real-hardware confirmation.
 
 ---
 **Return to `/context.md` for next steps.**

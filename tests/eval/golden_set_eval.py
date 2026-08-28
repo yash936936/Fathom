@@ -144,11 +144,42 @@ def load_golden_set(path: Path = _GOLDEN_SET_PATH) -> list[dict]:
     return entries
 
 
+_OUTPUT_RAIL_FALLBACK_PREFIX = "[The answer failed output safety/quality checks"
+_ZERO_EVIDENCE_PREFIX = "I wasn't able to find any sources for this question"
+
+
 def _classify_result(answer: str, flags: list[str]) -> tuple[bool, str | None]:
+    """Recognizes all FOUR distinct ways a query can be safely handled
+    without presenting an ungrounded answer -- see decisions.md D-062.
+    Missing the third and fourth cases was a real bug found via a real
+    run:
+    - "answerability" (D-045): the pre/post answerability check
+      confidently identifies a false premise.
+    - "output_rail": an ambiguous (low-confidence) answerability check
+      proceeds to synthesis per D-045's fail-open design; if synthesis
+      then produces an uncited answer, output_rail correctly
+      intercepts it.
+    - "zero_evidence": rag/synthesis.generate()'s own hardcoded
+      zero-chunk branch -- an HONEST "I couldn't find anything"
+      response, not a hallucination-risk case at all. Distinguishing
+      this from output_rail's fallback matters specifically for
+      low_evidence_review_candidates: flagging an honest "no evidence
+      found" statement as a hallucination-risk candidate would be a
+      false signal in the opposite direction from what that heuristic
+      exists to catch.
+    Missing "domain" and "answerability" alone was already handled;
+    missing "output_rail" specifically caused golden_set_eval.py to
+    under-count the false-premise catch rate on real data (status.md
+    Entry 044) by scoring a safely-handled query as a failure.
+    """
     if answer == REFUSAL_MESSAGE:
         return True, "domain"
     if answer.startswith(_ANSWERABILITY_REFUSAL_PREFIX):
         return True, "answerability"
+    if answer.startswith(_OUTPUT_RAIL_FALLBACK_PREFIX):
+        return True, "output_rail"
+    if answer.startswith(_ZERO_EVIDENCE_PREFIX):
+        return True, "zero_evidence"
     return False, None
 
 

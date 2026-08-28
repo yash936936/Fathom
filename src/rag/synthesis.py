@@ -38,6 +38,21 @@ explicitly rather than guessing.
 
 _CITATION_TAG_PATTERN = re.compile(r"\[([a-zA-Z0-9_:.,\s-]+)\]")
 
+# Per-chunk character cap for _format_sources(), added per decisions.md
+# D-062 after three independent real "Requested tokens exceed context
+# window" crashes. Budget: DEFAULT_N_CTX=8192 - DEEP_MODE_MAX_TOKENS=512
+# = ~7680 tokens available for the whole prompt; reserving room for the
+# system prompt, query, and (in --chat mode) conversation_context,
+# ~5500-6000 tokens realistically remain for the sources block. At the
+# default top_k=8, that's ~700-750 tokens/chunk -- 2000 characters is a
+# conservative cut of that (roughly 500 tokens at ~4 chars/token),
+# leaving real margin for tokenizer-estimate imprecision and for
+# --top-k being raised above the default. Not a guarantee against every
+# possible configuration (a much higher --top-k could still overflow),
+# but it directly closes the failure mode actually observed three times
+# on real hardware at the default settings.
+_MAX_CHUNK_CHARS = 2000
+
 # Matches a sentence-ending punctuation mark followed by whitespace --
 # used to find the last COMPLETE sentence boundary in a possibly-
 # truncated answer. Deliberately simple (no abbreviation handling like
@@ -77,7 +92,19 @@ def _format_sources(chunks: list[RetrievedChunk]) -> str:
     lines = []
     for chunk in chunks:
         date_part = f" ({chunk['date']})" if chunk.get("date") else ""
-        lines.append(f"[{chunk['source_id']}] {chunk['source']}{date_part}: {chunk['content']}")
+        # Truncated to _MAX_CHUNK_CHARS -- see status.md Entry 034/035/
+        # 044 and decisions.md D-062: real chunk content is unbounded
+        # (a full news article or web page excerpt can run several
+        # thousand characters), and with no cap here, top_k=8 real
+        # chunks could push the total prompt past DEFAULT_N_CTX=8192,
+        # crashing generate() entirely rather than degrading gracefully.
+        # Confirmed as the actual root cause of three independent real
+        # "Requested tokens exceed context window" crashes, all on
+        # queries with several long real chunks.
+        content = chunk["content"]
+        if len(content) > _MAX_CHUNK_CHARS:
+            content = content[:_MAX_CHUNK_CHARS] + "... [truncated]"
+        lines.append(f"[{chunk['source_id']}] {chunk['source']}{date_part}: {content}")
     return "\n\n".join(lines)
 
 

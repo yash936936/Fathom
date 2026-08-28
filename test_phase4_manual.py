@@ -140,6 +140,44 @@ check(
     "[response cut short]" in _smooth_truncation(no_sentence_at_all),
 )
 
+# --- D-062 (found on real hardware -- status.md Entry 034/035/044,
+# three independent "Requested tokens exceed context window" crashes):
+# _format_sources() must truncate long real chunk content, since
+# nothing bounded it before and top_k=8 real web/news excerpts could
+# push the synthesis prompt past DEFAULT_N_CTX=8192. ---
+from rag.synthesis import _format_sources, _MAX_CHUNK_CHARS
+
+long_chunk = RetrievedChunk(
+    source_id="web:0", source="Long Source", url="http://example.com", date=None,
+    relevance_score=1.0, content="A" * 5000,  # deliberately far longer than _MAX_CHUNK_CHARS
+)
+formatted = _format_sources([long_chunk])
+check("D-062: long chunk content is truncated, not embedded in full", len(formatted) < 5000)
+check("D-062: truncated content stays within _MAX_CHUNK_CHARS plus formatting overhead", len(formatted) < _MAX_CHUNK_CHARS + 200)
+check("D-062: truncation is marked, not silently cut", "[truncated]" in formatted)
+
+short_chunk = RetrievedChunk(
+    source_id="web:1", source="Short Source", url="http://example.com", date=None,
+    relevance_score=1.0, content="A short chunk that needs no truncation.",
+)
+formatted_short = _format_sources([short_chunk])
+check("D-062: short chunk content is NOT truncated or marked", "[truncated]" not in formatted_short and "A short chunk that needs no truncation." in formatted_short)
+
+# --- D-062: realistic worst case -- top_k=8 chunks, each long enough
+# on its own to have contributed to the real overflow, must now stay
+# comfortably within budget once combined. ---
+eight_long_chunks = [
+    RetrievedChunk(source_id=f"web:{i}", source=f"Source {i}", url="http://example.com", date=None,
+                    relevance_score=1.0, content="B" * 4000)
+    for i in range(8)
+]
+formatted_eight = _format_sources(eight_long_chunks)
+# ~4 chars/token is a reasonable rough estimate for this kind of prose --
+# not exact, but more than sufficient margin to confirm this stays well
+# under the ~7000-token budget reserved for the sources block (see
+# _MAX_CHUNK_CHARS's own comment for the full budget breakdown).
+check("D-062: 8 long real-sized chunks combined stay well under a safe token-budget estimate", len(formatted_eight) // 4 < 7000)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")
