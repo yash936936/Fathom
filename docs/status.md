@@ -7,19 +7,37 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 048): D-063 CONFIRMED working on real hardware**
+  (unchecked citations 12 -> 3; github 403 did not recur) -- **but a
+  NEW finding (D-065) means the v1.0 tag is explicitly held**:
+  false-premise catch rate swung 83.3% -> 50.0% across two identical
+  back-to-back real runs, root-caused to a non-deterministic
+  (temperature=0.2) post-generation answerability re-check. The 83.3%
+  figure this file and `readme.md` previously treated as final was
+  premature. Fix options and full trace in `decisions.md` D-065 --
+  not yet resolved.
+- **CORRECTION (Entry 047): an earlier claim here ("golden_set_eval.py
+  ... still has NOT been re-run") was WRONG when written and is now
+  corrected against `docs/eval_log.md`'s actual append log, not
+  memory.** Plain `golden_set_eval.py` (no `--with-judge`) HAS been
+  run for real, multiple times: 2026-08-28 21:49 UTC, 22:33 UTC,
+  2026-08-29 22:08 UTC, and 23:01 UTC. The first two predate D-062/
+  D-063's fixes. The latter two (post-fix) are the pair that surfaced
+  D-065's variance finding -- see the entry immediately above.
+  This correction exists because Entry 046 repeated an earlier
+  session's stale claim without checking `eval_log.md` directly --
+  same class of error this project has caught and corrected before
+  (D-054 retracting D-052's leniency claim), applied to a doc-sync gap
+  instead of a metric this time.
 - **UPDATE (Entry 046): D-062's `n_ctx` truncation fix CONFIRMED on
-  real hardware** — the ISS query (crashed 3 runs running, Entries
+  real hardware** -- the ISS query (crashed 3 runs running, Entries
   034/035/044) completed cleanly with no overflow this run. Two new
   real findings from that same run were root-caused and fixed
   (D-063/B-021): `citation_verifier`'s parser couldn't handle a flat
   `[true, false, ...]` boolean-array response shape and was silently
   discarding real verdicts as a parse failure; `github_search` hit a
   real 403 rate limit with no self-throttle (same class as B-012,
-  never applied to this tool). Both fixed, 273/273 regression, neither
-  yet re-confirmed on real hardware. `golden_set_eval.py` (plain +
-  `--with-judge`) still has NOT been re-run since D-062's classifier
-  fix — that specific confirmation (false-premise catch rate) remains
-  open, separate from this entry's fixes.
+  never applied to this tool). Both now CONFIRMED per Entry 048 above.
 - **Active phase: Phase 10 — started (D-059), judge integration added (D-060).** Built `tests/eval/
   golden_set.jsonl` (32 entries, 4 categories) and `tests/eval/
   golden_set_eval.py`, scoped specifically to the two `prd.md` §5
@@ -90,6 +108,92 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 048
+**Phase:** 10, D-063 confirmed on real hardware; NEW variance finding (D-065) — v1.0 tag held
+**Action taken:** user ran, for real: `citation_accuracy_eval.py
+--with-judge`, `golden_set_eval.py --with-judge`, and plain
+`golden_set_eval.py` — three real runs in one session.
+
+**Confirmed working (D-063):** `citation_verifier`'s boolean-array
+parse fix — `unchecked` citations dropped 12 → 3 on the same-shaped
+eval. `github_search`'s 403 did not recur this run. Neither is a
+100%-certain confirmation (small sample, timing-dependent for the
+rate limit) but both are real, positive, consistent evidence.
+
+**NEW finding, not previously known:** false-premise catch rate has
+real run-to-run variance — 83.3% then 50.0%, same code, ~53 min apart.
+Root-caused to `llm_backend.py`'s default `temperature=0.2` on the
+post-generation answerability re-check (unlike `domain_gate.py`'s
+deliberately deterministic pre-check). Full writeup and two candidate
+fixes in `decisions.md` D-065. **This directly means the 83.3% number
+written into `readme.md` after Entry 047 was premature** — corrected
+this entry, not left standing.
+**Also confirmed stable (positive):** answerable false-positive
+refusal rate held at 0.0% across both new golden-set runs.
+**Decisions logged this run:** D-065.
+**readme.md updated:** false-premise catch rate now shown as a range
+(50.0%–83.3%) with an explicit note that it's under investigation,
+rather than a single number. Citation accuracy figure left at the
+last SINGLE-JUDGE number on record (57.1%, pre-D-063) since no plain
+(non `--with-judge`) citation run has happened post-fix yet — the
+`--with-judge` run's 62.5%/54.3% figures are a different metric
+(self-judged vs. independent-judge accuracy, not the single blended
+per-claim number `readme.md` was already quoting) and would be
+misleading to substitute in without a matching plain run.
+**v1.0 tag: explicitly NOT recommended yet.** D-065 is exactly the
+kind of instability that shouldn't be shipped past without either
+fixing the determinism gap or committing to a documented range —
+tagging on the strength of Entry 047's single (now known-unstable)
+number would have been a mistake.
+**Next action for next session:** decide between D-065's two options
+(range-reporting vs. `temperature=0.0` fix for the answerability
+re-check), implement whichever is chosen, then re-run `golden_set_
+eval.py` at least 3x to confirm the number has actually stabilized
+before tagging. Separately, a plain (non-judge) `citation_accuracy_
+eval.py` run is still owed for an updated single-judge citation
+accuracy figure.
+
+### Entry 047
+**Phase:** 10, doc-sync correction + Windows-only v1 scope decision + readme finalized against real numbers
+**Action taken:** user reported last night's `golden_set_eval.py
+--with-judge` run and pasted `eval_log.md`'s actual content directly.
+Cross-checked it against `status.md`'s prose claims and found the
+claims were WRONG — `eval_log.md` already had two real plain-run
+entries (21:49/22:33 UTC) that multiple prior status.md entries
+(042, 043, 045, 046) had all repeated as "no real run yet" without
+re-checking the source of truth. Corrected in "Current state" above
+rather than silently fixing it and moving on.
+
+Also, per explicit user direction ("keeping it for Windows, except for
+that fix that is remaining"), logged D-064: v1 is explicitly scoped to
+Windows for this release, with macOS/Linux formally deferred (not
+dropped) to a documented follow-up. Finalized `readme.md` against the
+real numbers actually on record (the two eval_log.md golden-set
+entries + the 57.1% citation accuracy figure), replacing the Phase-0
+stub it had carried since project start — explicitly marked v1 as
+Windows-only in the README itself, not just in internal docs, so
+external readers aren't misled either.
+**Decisions logged this run:** D-064.
+**Regression status:** unchanged (docs-only entry, no source touched).
+**Not yet done, still genuinely open:**
+1. Confirm D-063 (citation_verifier boolean-array fix + github_search
+   throttle) on real hardware — sandbox-only so far.
+2. Complete a `golden_set_eval.py --with-judge` run — last night's
+   attempt reached query 7/32 in the pasted output; not confirmed
+   finished, crashed, or still running. Needs re-attempting or
+   resuming.
+3. Re-run `citation_accuracy_eval.py --with-judge` post-D-063 to get
+   an updated citation accuracy number (last one on record, 57.1%, is
+   pre-fix).
+4. Re-run plain `golden_set_eval.py` once more post-D-062/D-063 fixes
+   for a truly final confirming number (the two existing real entries
+   both predate both fixes).
+5. Tag v1.0 once 1-4 are done and reflected in `readme.md`/`eval_log.md`.
+**Next action for next session:** run the four confirmation commands
+above in one real session (order doesn't matter much, they're
+independent), update `readme.md`'s numbers if anything material
+changes, then tag.
 
 ### Entry 046
 **Phase:** 6/10, real-hardware re-run analyzed, two new bugs found and fixed, one prior fix confirmed

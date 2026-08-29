@@ -2410,3 +2410,97 @@ item, not closed by this entry.
 
 ---
 **Return to `/context.md` for next steps.**
+
+### D-064 — v1 explicitly scoped to Windows; macOS/Linux formally deferred, not dropped
+
+**Context:** per `phases.md`, Phase 8/9's stated exit criteria are
+"all three OSes." Windows is fully closed (D-044/D-057/D-058); macOS
+is genuinely hardware-blocked (no Mac available, unchanged since
+Phase 8 started); Linux is functionally tested directly (D-056) but
+not yet via a packaged installer flow the way Windows now has.
+
+**Decision:** per explicit user direction, v1 ships Windows-only.
+This is a real, logged scope reduction from `phases.md`'s original
+Phase 8/9 exit criteria, not a silent one — `phases.md`'s Phase 8/9
+sections are left as-is (they still describe the v1 vision correctly),
+and this entry plus `readme.md`'s own "Windows only for this release"
+line are the record of the actual shipped scope. macOS and Linux are
+DEFERRED, meaning: the code is not platform-specific (D-033's guard
+exists precisely so the same Python runs on any OS once tested there),
+Linux's `install.sh` already works when run directly, and macOS's
+`postinstall.sh` is written and believed correct per spec but
+unconfirmed. None of this is being thrown away — it's a documented
+follow-up release (v1.1, informally), not a v2 feature.
+
+**What this does NOT change:** Phase 10's exit criteria (real eval
+numbers, `readme.md` finalized, v1.0 tag) still apply in full — scoping
+platform down doesn't relax the evaluation/documentation bar. See
+status.md Entry 047 for the specific items still open before tagging.
+
+**Files touched:** `docs/status.md` (Entry 047), `docs/readme.md`
+(finalized, explicit "Windows only for this release" line added).
+**Not yet done:** the actual v1.0 tag — waiting on Entry 047's
+still-open confirmation items, not on this scope decision itself.
+
+---
+
+### D-065 — False-premise catch rate shown to have real run-to-run variance (83.3% vs 50.0%, same code); v1.0 tag held pending a fix or a documented range
+
+**Context:** two consecutive real `golden_set_eval.py` runs, ~53
+minutes apart, no code changes between them: false-premise catch rate
+went 83.3% → 50.0%. Traced against the actual per-query transcript
+(not assumed): golden-set queries 22/23/24 (JWST-2019,
+Wikipedia-2015, Australia-1975) are refused before retrieval in both
+runs — stable. Queries 21 (Eiffel Tower), 25 (Python discontinued),
+26 (Nintendo consoles) reach full generation in both runs; whether
+they get caught depends on the POST-generation answerability re-check,
+which flipped from 2/3 caught to 0/3 caught between the two runs.
+
+**Root cause:** `llm_backend.py` defaults generation temperature to
+0.2, not 0 — only `domain_gate.py`'s pre-check is deliberately
+deterministic (`temperature=0.0`, with a comment explaining why:
+"this is a classification, not..."). The post-generation answerability
+re-check inherits the 0.2 default and is genuinely sampling different
+outputs run to run on these three borderline-worded false premises.
+This is real model stochasticity, not a scoring bug in
+`golden_set_eval.py` itself.
+
+**What this means for the numbers already in `readme.md` /
+`decisions.md` D-064:** the 83.3% figure I wrote into `readme.md`
+after Entry 047 was a single sample of a metric that just demonstrated
+real variance, presented as if stable. That was premature — flagged
+here rather than left uncorrected.
+
+**Decision:** do NOT tag v1.0 on a single golden-set run's
+false-premise number. Two options, not yet chosen between:
+1. Run `golden_set_eval.py` N times (5+) and report a range/median for
+   false-premise catch rate in `readme.md`, honestly reflecting the
+   variance rather than hiding it behind one point estimate.
+2. Set `temperature=0.0` for the post-generation answerability
+   re-check specifically (mirroring domain_gate's existing reasoning),
+   trading a small amount of the re-check's expressiveness for
+   determinism on exactly the kind of borderline case this metric is
+   supposed to measure — then confirm with a repeat run that the
+   number stabilizes.
+Option 2 is likely the better fix (it's the same reasoning
+domain_gate already applies, just not yet extended to this second
+classification step) but changes real generation behavior and should
+be a deliberate call, not bundled silently into a docs fix.
+
+**Not yet decided:** which of the two options to take. **Not yet
+done:** either fix, and the repeat-run confirmation either would need.
+**readme.md updated in the meantime** to show the real range (50.0%–
+83.3%) rather than a single cherry-picked number, and to note the tag
+is held pending this.
+
+**Also confirmed this run (positive):** D-063's citation_verifier fix
+is working — `unchecked` citations dropped 12 → 3 on the
+`citation_accuracy_eval.py --with-judge` re-run (not yet zero; a
+residual unparseable-shape case likely remains, lower priority than
+D-065). `github_search`'s 403 did not recur in this run, consistent
+with (not proof of) the throttle fix. Answerable false-positive
+refusal rate held at 0.0% across both new golden-set runs — genuinely
+stable so far, unlike the false-premise number.
+
+---
+**Return to `/context.md` for next steps.**
