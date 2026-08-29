@@ -87,6 +87,47 @@ result8 = verify_citations(citations8, CHUNKS, model8, debug_report=lambda msg: 
 check("truncated multi-citation batch still fails open (both stay None)", result8[0]["verified"] is None and result8[1]["verified"] is None)
 check("debug_report captures the truncated raw text for real diagnosis", truncated in debug_messages8[0])
 
+# --- Test 9 (B-021, found on real hardware, status.md Entry 046):
+# model sometimes returns a flat [true, false, ...] array instead of
+# the requested [{"index": N, "supported": bool}, ...] objects. This
+# used to raise TypeError('bool' object is not subscriptable) inside
+# the try block and fall through to fail-open, discarding verdicts the
+# model actually gave. Now accepted and mapped positionally. ---
+citations9 = [
+    Citation(claim="Claim A", source_id="web:0", verified=None),
+    Citation(claim="Claim B", source_id="web:1", verified=None),
+]
+model9 = StubModel("[false, true]")
+result9 = verify_citations(citations9, CHUNKS, model9)
+check("B-021: flat boolean array is accepted, not treated as a parse failure", result9[0]["verified"] is False and result9[1]["verified"] is True)
+check("B-021: exactly one call made for the flat-array response", model9.call_count == 1)
+
+# --- Test 10: flat boolean array with prose wrapped around it (the
+# real observed raw response shape: "[\n  false,\n  false,\n  false,\n  true\n]") ---
+citations10 = [
+    Citation(claim="Claim A", source_id="web:0", verified=None),
+    Citation(claim="Claim B", source_id="web:1", verified=None),
+]
+model10 = StubModel("[\n  false,\n  true\n]")
+result10 = verify_citations(citations10, CHUNKS, model10)
+check("B-021: whitespace-formatted flat boolean array parses correctly", result10[0]["verified"] is False and result10[1]["verified"] is True)
+
+# --- Test 11: an EMPTY flat array still falls through cleanly (no
+# crash from `all()` on an empty sequence vacuously being True) --
+# falls to the object-shape branch, then fails open since there's
+# nothing to map onto `to_check`. ---
+citations11 = [Citation(claim="Claim A", source_id="web:0", verified=None)]
+model11 = StubModel("[]")
+result11 = verify_citations(citations11, CHUNKS, model11)
+check("B-021: empty array does not crash, citation stays unchecked", result11[0]["verified"] is None)
+
+# --- Test 12: the original object-shaped format still works exactly
+# as before -- this fix must not regress the primary path. ---
+citations12 = [Citation(claim="Claim A", source_id="web:0", verified=None)]
+model12 = StubModel('[{"index": 0, "supported": true}]')
+result12 = verify_citations(citations12, CHUNKS, model12)
+check("B-021: original object-shaped verdicts still parse correctly (no regression)", result12[0]["verified"] is True)
+
 # --- Test 4: summarize() counts correctly ---
 mixed = [
     Citation(claim="a", source_id="web:0", verified=True),

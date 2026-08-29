@@ -7,6 +7,19 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 046): D-062's `n_ctx` truncation fix CONFIRMED on
+  real hardware** — the ISS query (crashed 3 runs running, Entries
+  034/035/044) completed cleanly with no overflow this run. Two new
+  real findings from that same run were root-caused and fixed
+  (D-063/B-021): `citation_verifier`'s parser couldn't handle a flat
+  `[true, false, ...]` boolean-array response shape and was silently
+  discarding real verdicts as a parse failure; `github_search` hit a
+  real 403 rate limit with no self-throttle (same class as B-012,
+  never applied to this tool). Both fixed, 273/273 regression, neither
+  yet re-confirmed on real hardware. `golden_set_eval.py` (plain +
+  `--with-judge`) still has NOT been re-run since D-062's classifier
+  fix — that specific confirmation (false-premise catch rate) remains
+  open, separate from this entry's fixes.
 - **Active phase: Phase 10 — started (D-059), judge integration added (D-060).** Built `tests/eval/
   golden_set.jsonl` (32 entries, 4 categories) and `tests/eval/
   golden_set_eval.py`, scoped specifically to the two `prd.md` §5
@@ -77,6 +90,60 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 046
+**Phase:** 6/10, real-hardware re-run analyzed, two new bugs found and fixed, one prior fix confirmed
+**Action taken:** user re-ran `citation_accuracy_eval.py --with-judge`
+plus the full test suite for real. Read the actual terminal output
+directly rather than taking the headline accuracy percentages at face
+value.
+
+**Confirmed:** D-062's `n_ctx` truncation fix held — the ISS query
+completed cleanly this run, no overflow, first clean pass after three
+consecutive crashes (Entries 034/035/044). Logged as a real
+confirmation, not left implicit in the raw output.
+
+**Found and fixed (B-021/D-063):**
+- `citation_verifier.verify_citations()` crashed with `TypeError:
+  'bool' object is not subscriptable` on 2/12 queries. Root cause: the
+  model sometimes answers with a flat `[true, false, ...]` array
+  instead of the requested `[{"index": N, "supported": bool}, ...]`
+  objects — a fully legible, correctly-ordered answer that the parser
+  couldn't read, so it fell into the same fail-open path as a genuine
+  parse failure and discarded 10 real verdicts across the run. Fixed
+  by detecting the all-boolean-array shape and mapping positionally,
+  additive to (not replacing) the original object-shaped parse.
+- `github_search` hit a real 403 rate-limit error under the agentic
+  path's retry loop — same failure class B-012 already fixed for
+  arXiv, never applied to this tool. Added an identical module-level
+  self-throttle, tuned to GitHub's documented 10 req/min
+  unauthenticated limit (D-031).
+
+**Pushed back on, not fixed:** the Qwen-vs-judge accuracy percentages
+(45.2%/58.1%) and the "leniency direction" framing. Flagged that
+neither individual accuracy number is validated against ground truth
+(two LLMs grading each other), and that this run's CRISPR result
+(Qwen more lenient) is a *third* direction relative to D-052's
+original claim and D-054's correction — not enough data to support any
+directional claim, consistent with D-054's own retraction logic
+applied prospectively this time instead of after the fact.
+
+**Decisions/bugs logged this run:** D-063, B-021.
+**Regression status:** 273/273 across the full 16 sandbox-runnable
+test files (Phase 9's model-download tests remain untestable here —
+standing sandbox gap, unrelated to this session's changes).
+**Not yet done:** neither of this session's fixes has run on real
+hardware yet. `golden_set_eval.py` (plain + `--with-judge`) has still
+not been re-run since D-062's classifier fix — Entry 045's original
+"next action" #2 (false-premise catch rate confirmation) remains open
+and was NOT addressed by this session's `citation_accuracy_eval.py`
+re-run, which is a different tool measuring a different thing.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py` (plain, then `--with-judge`) — the one piece of Entry 045's
+follow-up still outstanding. Separately, re-run
+`citation_accuracy_eval.py --with-judge` again to see whether the
+boolean-array fix reduces `unchecked` counts and whether the
+`github_search` 403 stops recurring.
 
 ### Entry 045
 **Phase:** 6/10, D-061's three findings root-caused and closed (Windows; macOS/Linux held per user request)

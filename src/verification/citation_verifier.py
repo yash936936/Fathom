@@ -69,6 +69,12 @@ def verify_citations(
     doesn't guess which one it is, it just makes the actual raw text
     visible so that question can be answered from real data on the
     next run, instead of guessed at.
+
+    Per debug.md B-021: real-hardware runs also showed the model
+    sometimes returns a flat `[true, false, ...]` array instead of the
+    requested `[{"index": N, "supported": bool}, ...]` objects -- that
+    shape is accepted too (mapped positionally), rather than treated as
+    a parse failure, since the verdicts themselves were unambiguous.
     """
     to_check = [c for c in citations if c.get("verified") is None]
     if not to_check:
@@ -90,7 +96,23 @@ def verify_citations(
         start = raw.index("[")
         end = raw.rindex("]") + 1
         parsed = json.loads(raw[start:end])
-        verdicts = {int(item["index"]): bool(item["supported"]) for item in parsed}
+        if parsed and all(isinstance(item, bool) for item in parsed):
+            # Per status.md Entry 046 / B-021: real-hardware runs showed
+            # Qwen3-4B sometimes answers the entailment question
+            # correctly but in a flat `[true, false, ...]` shape instead
+            # of the requested `[{"index": N, "supported": bool}, ...]`
+            # objects -- `item["index"]` on a bool raised
+            # TypeError('bool' object is not subscriptable), which fell
+            # through to the fail-open path even though the verdicts
+            # were fully present and unambiguous. Map positionally onto
+            # `to_check` (the same order _format_claims presented them
+            # in) rather than discard them. This assumes the model
+            # preserved order and dropped nothing -- a real assumption,
+            # not a guarantee -- so it's still bounded by `to_check`'s
+            # length below rather than trusted blindly.
+            verdicts = {i: bool(v) for i, v in enumerate(parsed)}
+        else:
+            verdicts = {int(item["index"]): bool(item["supported"]) for item in parsed}
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         if debug_report:
             debug_report(

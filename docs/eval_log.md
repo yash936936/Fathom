@@ -50,3 +50,33 @@ judge comparison" so the two are easy to tell apart at a glance.
 **False-premise catch rate:** 83.3%
 **Answerable false-positive refusal rate:** 10.0%
 **Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-08-29 00:07 UTC (Qwen vs. Llama-3.1-8B judge comparison, D-049)
+**Hardware:** (unspecified)
+**Queries run:** 12 (0 errored)
+**Qwen3-4B self-judged accuracy:** 45.2% (12 citation(s) left unchecked by Qwen's own call)
+**Llama-3.1-8B judge accuracy:** 58.1% (0 citation(s) left unchecked by the judge)
+**Agreement rate:** 71.0% (22 agree / 9 disagree)
+
+### 2026-08-29 21:18 UTC (Qwen vs. Llama-3.1-8B judge comparison, D-049)
+**Hardware:** (unspecified)
+**Queries run:** 12 (0 errored)
+**Qwen3-4B self-judged accuracy:** 62.5% (3 citation(s) left unchecked by Qwen's own call)
+**Llama-3.1-8B judge accuracy:** 54.3% (0 citation(s) left unchecked by the judge)
+**Agreement rate:** 68.8% (22 agree / 10 disagree)
+
+### 2026-08-29 22:08 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 32 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 83.3%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-08-29 23:01 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 32 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 50.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)

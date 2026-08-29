@@ -559,4 +559,51 @@ everything else; this fix is sandbox-verified against the exact
 real-world failure pattern, not yet re-run for real.
 
 ---
+
+### B-021 — `citation_verifier.verify_citations()` crashed on a flat boolean-array response, discarding real verdicts as a parse failure
+
+**Symptom (real hardware, status.md Entry 046):** `citation_accuracy_
+eval.py --with-judge` logged, for 2 of 12 queries (`inflation rate`,
+`room-temp superconductors`): `citation_verifier parse failure (5
+citations in batch, max_tokens=100): TypeError: 'bool' object is not
+subscriptable. Raw response: '[\n  false,\n  false,\n  false,\n
+true\n]'`. Both queries ended with all 5 citations `unchecked` in the
+final report.
+
+**Root cause:** `verify_citations()`'s parse step assumed the model
+would always return `[{"index": N, "supported": bool}, ...]` (per
+`_SYSTEM_PROMPT`) and immediately did `item["index"]` on every element
+of the parsed JSON array. The model sometimes instead returns a flat
+`[true, false, ...]` array -- syntactically valid JSON, and an
+unambiguous, correctly-ordered answer to the entailment question --
+just not the requested object shape. `item["index"]` on a `bool`
+raises `TypeError: 'bool' object is not subscriptable`, which the
+existing `except (ValueError, KeyError, TypeError, json.JSONDecodeError)`
+correctly caught, so this fell into the SAME fail-open path as a
+genuine parse failure -- but it isn't one. The model's answer was
+fully legible; the code just couldn't read that shape.
+
+**Fix:** before attempting the object-shaped parse, check whether the
+parsed array is entirely booleans (`all(isinstance(item, bool) for
+item in parsed)`); if so, map verdicts positionally onto `to_check`
+instead of indexing into a bool. The original object-shaped parse is
+tried in all other cases, unchanged -- this is an added acceptance
+path, not a replacement of the primary one. Documented as resting on
+an assumption (order-preservation, no dropped entries) rather than a
+guarantee -- see D-063 for the full reasoning and the safe-degradation
+argument for why that's an acceptable risk here.
+
+**Files touched:** `src/verification/citation_verifier.py`,
+`test_phase6_manual.py` (+5 checks: bare flat array, whitespace-
+formatted flat array, empty-array edge case, and a no-regression check
+confirming the original object-shaped format still parses correctly).
+**Verification:** 19/19 in `test_phase6_manual.py`, 273/273 across the
+full 16 sandbox-runnable test files.
+**Not yet confirmed on real hardware** -- same standing gap as every
+fix in this project before its first real-hardware run. The next
+`citation_accuracy_eval.py --with-judge` run against these same two
+query types (or any query whose raw response happens to come back as
+a flat boolean array) is the actual confirmation this needs.
+
+---
 **Return to `/context.md` for next steps.**

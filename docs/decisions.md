@@ -2327,4 +2327,86 @@ real-hardware failure patterns, same standing gap as everything else
 in this project before its first real-hardware confirmation.
 
 ---
+
+### D-063 — Fixed real findings from Entry 046's `--with-judge` re-run: citation_verifier's boolean-array parse gap (B-021), github_search self-throttle
+
+**Context:** the real-hardware re-run confirmed D-062's `n_ctx`
+truncation fix held (ISS query completed cleanly, no crash, first time
+in four runs). Two NEW real findings came out of the same run, read
+from the actual raw output rather than inferred:
+
+1. Two queries (`inflation rate`, `room-temp superconductors`) hit
+   `citation_verifier`'s fail-open path with `TypeError: 'bool' object
+   is not subscriptable`. Traced to actual code
+   (`verify_citations()`'s `item["index"]` access) against the actual
+   raw response (`[false, false, false, true]`) -- the model answered
+   the entailment question correctly, just as a flat boolean array
+   instead of the requested `[{"index": N, "supported": bool}, ...]`
+   object array. This was previously indistinguishable from a genuine
+   parse failure and silently discarded 10 real verdicts across the
+   run (5 citations each), inflating the "unchecked" count without any
+   actual ambiguity in what the model said.
+2. `github_search` failed with a real 403 rate-limit error
+   (`solid-state battery` query) -- same failure class B-012 already
+   fixed for arXiv (rapid successive calls under the agentic path's
+   retry loop, no self-throttle), just never applied to this tool.
+
+**Fix 1 (B-021):** `citation_verifier.verify_citations()` now checks
+whether the parsed JSON array is entirely booleans before attempting
+the object-shaped parse; if so, maps verdicts positionally
+(`{i: bool(v) for i, v in enumerate(parsed)}`) instead of falling
+through to fail-open. The object-shaped path is unchanged and still
+tried first for anything that isn't a pure boolean array, so this is
+additive, not a replacement. Explicitly logged as an ASSUMPTION, not a
+guarantee: this trusts that the model preserved claim order and
+dropped none -- reasonable given `_format_claims()` presents claims in
+a fixed numbered order and the model is asked to answer "in the same
+order given," but not provable from the array alone the way an
+explicit `index` field would be. If this assumption ever proves wrong
+in practice (e.g. a future run shows a boolean array shorter than
+`to_check`), the existing `verdicts.get(check_idx)` lookup already
+degrades safely -- missing entries stay `None` (unchecked), not
+silently wrong.
+
+**Fix 2:** `github_search.py` gets an identical self-throttle to
+`arxiv_feed.py`'s (`_throttle()`, module-level `_last_call_time`),
+tuned to GitHub's documented 10 req/min unauthenticated limit (one
+call per 6s, per D-031). Explicitly scoped: this addresses the
+*rapid-successive-calls* rate limit (the one that actually fired this
+run), not GitHub's separate hourly quota (60/hr unauthenticated) --
+no in-process throttle can prevent that one without an API key, which
+would conflict with this project's no-API-key-required design (D-031).
+Real-hardware confirmation of whether the 403 stops recurring is still
+owed, same as every other fix in this project before its first
+real-hardware run.
+
+**Also logged:** D-062's `n_ctx` truncation fix is now CONFIRMED on
+real hardware -- the ISS query, the specific query that crashed three
+times running (Entries 034/035/044), completed cleanly this run with
+no overflow. Closing that open item for real, not just code-complete.
+
+**Files touched:** `src/verification/citation_verifier.py`,
+`src/tools/github_search.py`, `test_phase6_manual.py` (+5 checks:
+flat boolean array accepted, whitespace-formatted variant, empty-array
+edge case, and a no-regression check that the original object shape
+still works), `test_phase6_sources.py` (+4 checks for the throttle,
+using a mocked clock so the test suite doesn't actually burn 6 real
+seconds per run).
+**Decided by:** Claude (session work), reviewed against real
+Entry-046 terminal output rather than assumed from the pattern alone.
+**Verification:** 273/273 across the full 16 sandbox-runnable test
+files (Phase 9's model-download tests remain untestable here per the
+same standing `llama-cpp-python`/network sandbox gap as every prior
+session -- unrelated to this change).
+**Not yet done:** neither fix has run on real hardware yet -- same
+standing gap as everything else in this project before its first
+real-hardware confirmation. The next `citation_accuracy_eval.py
+--with-judge` run should show fewer/zero `unchecked` counts on queries
+that previously hit this exact parse shape, and the next run touching
+`github_search` should show whether the 403 stops recurring.
+`golden_set_eval.py` (plain + `--with-judge`) still hasn't been
+re-run since the D-062 classifier fix -- that's a separate, still-open
+item, not closed by this entry.
+
+---
 **Return to `/context.md` for next steps.**

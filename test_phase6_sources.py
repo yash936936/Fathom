@@ -98,6 +98,48 @@ source = inspect.getsource(retrieve_fn)
 check("reddit_search no longer in the default tool list", '"reddit_search"' not in source.split("all_chunks")[0])
 check("github_search still in the default tool list", '"github_search"' in source)
 
+# --- D-063/B-021: github_search.py now self-throttles like arxiv_feed.py.
+# Tested by directly exercising _throttle() with a mocked clock, so this
+# doesn't actually burn 6 real seconds per test run. ---
+import tools.github_search as github_search_module
+
+_fake_now = [0.0]
+_sleep_calls = []
+
+
+def _fake_monotonic():
+    return _fake_now[0]
+
+
+def _fake_sleep(seconds):
+    _sleep_calls.append(seconds)
+    _fake_now[0] += seconds
+
+
+_real_monotonic = github_search_module.time.monotonic
+_real_sleep = github_search_module.time.sleep
+github_search_module.time.monotonic = _fake_monotonic
+github_search_module.time.sleep = _fake_sleep
+github_search_module._last_call_time = 0.0
+
+github_search_module._throttle()  # first call: no prior call time recorded meaningfully -> may or may not sleep depending on default
+check("first _throttle() call does not need a wait beyond the configured interval", _sleep_calls == [] or _sleep_calls[0] <= github_search_module._MIN_INTERVAL_SECONDS)
+
+_sleep_calls.clear()
+_fake_now[0] += 1.0  # only 1 second elapsed since the last call
+github_search_module._throttle()
+check("B-021: second call within the interval sleeps for the remaining time", _sleep_calls == [github_search_module._MIN_INTERVAL_SECONDS - 1.0])
+
+_sleep_calls.clear()
+_fake_now[0] += github_search_module._MIN_INTERVAL_SECONDS + 5.0  # plenty of time elapsed
+github_search_module._throttle()
+check("B-021: call after the interval has fully elapsed does not sleep", _sleep_calls == [])
+
+check("B-021: _MIN_INTERVAL_SECONDS matches GitHub's documented 10 req/min limit (D-031)", github_search_module._MIN_INTERVAL_SECONDS == 6.0)
+
+github_search_module.time.monotonic = _real_monotonic
+github_search_module.time.sleep = _real_sleep
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")
