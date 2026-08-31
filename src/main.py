@@ -273,6 +273,29 @@ def run_query(
         retrieved = retrieve(query, debug_report=debug_report)
         chunks = rerank(retrieved, top_k=top_k, requires_recency=state.get("requires_recency", False))
 
+        if not chunks:
+            # Per decisions.md D-066: real-hardware runs showed the
+            # fast path had NO retry on a completely empty retrieval,
+            # unlike the agentic path's sufficiency-check loop (up to
+            # 3 attempts). A transient blip (all 5 tools momentarily
+            # returning nothing at once) then fell straight through to
+            # synthesis's hardcoded zero_evidence branch, wrongly
+            # refusing answerable queries -- confirmed via two
+            # back-to-back real golden-set runs where the SAME queries
+            # got "0 sources" once and 5-8 sources ~50 minutes later.
+            # One retry, same query, is enough to distinguish a real
+            # blip from a genuinely unfindable topic, without adding
+            # the full multi-attempt replanning cost of the agentic
+            # path to every fast-path query.
+            if debug_report:
+                debug_report(
+                    "fast path: initial retrieval returned 0 chunks, retrying once"
+                )
+            retrieved = retrieve(query, debug_report=debug_report)
+            chunks = rerank(
+                retrieved, top_k=top_k, requires_recency=state.get("requires_recency", False)
+            )
+
         # Per code_logic.md §3 step 3 (Phase 6, D-045): a cheap
         # false-premise check before spending a synthesis call. Skipped
         # in quick mode -- quick mode's entire purpose (D-027) is

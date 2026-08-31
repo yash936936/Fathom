@@ -7,15 +7,33 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 049): ROOT CAUSE FOUND AND FIXED (D-066/B-022)** --
+  a targeted back-to-back pair of real `golden_set_eval.py` runs
+  (requested specifically to separate retrieval variance from
+  generation variance) caught the fast path returning `"0 sources"`
+  on 3 queries in run 1 and normal 5-8 sources on the SAME 3 queries
+  in run 2. Confirmed against actual code: the fast path called
+  `retrieve()` exactly once with no retry, unlike the agentic path.
+  Fixed with a single bounded retry on empty retrieval. 285/285
+  regression (up from 273/16 files -- new test file added). **NOT yet
+  confirmed on real hardware** -- v1.0 tag remains held until it is.
+  This is now believed to be the DOMINANT cause of D-065's false-
+  premise/answerable-refusal swings; D-065's synthesis-temperature and
+  retrieval-content-drift theories are demoted to secondary/unconfirmed
+  per D-066's own text, not ruled out entirely.
 - **UPDATE (Entry 048): D-063 CONFIRMED working on real hardware**
   (unchecked citations 12 -> 3; github 403 did not recur) -- **but a
   NEW finding (D-065) means the v1.0 tag is explicitly held**:
   false-premise catch rate swung 83.3% -> 50.0% across two identical
-  back-to-back real runs, root-caused to a non-deterministic
-  (temperature=0.2) post-generation answerability re-check. The 83.3%
-  figure this file and `readme.md` previously treated as final was
-  premature. Fix options and full trace in `decisions.md` D-065 --
-  not yet resolved.
+  back-to-back real runs. **Entry 048's original root-cause claim
+  (non-deterministic post-generation answerability check) was WRONG
+  and has been corrected in `decisions.md` D-065's own text** --
+  `answerability.py` was checked directly and is already
+  `temperature=0.0`. Actual likely sources: `synthesis.py`'s
+  `temperature=0.3` (affects whether `output_rail` catches an uncited
+  answer) and/or live retrieval returning different results across
+  the ~53-minute gap between runs. Full corrected trace in D-065 --
+  still not yet resolved.
 - **CORRECTION (Entry 047): an earlier claim here ("golden_set_eval.py
   ... still has NOT been re-run") was WRONG when written and is now
   corrected against `docs/eval_log.md`'s actual append log, not
@@ -108,6 +126,53 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 049
+**Phase:** 10, requested back-to-back diagnostic run isolated the real root cause; fixed and tested
+**Action taken:** at Claude's request, user ran `golden_set_eval.py`
+twice with minimal gap (run 2 started right after run 1 finished,
+~50 min total for both) specifically to distinguish retrieval-timing
+variance from model-sampling variance in D-065's swing.
+
+**Found:** run 1 logged `"Generating answer from 0 sources"` on
+queries 10, 25, and 28; run 2 showed normal 5-8 sources on the exact
+same 3 queries. This is a clean, mechanical signal, not a subtle
+statistical one. Traced to `src/main.py`'s fast path calling
+`retrieve()` exactly once with no retry — confirmed by reading the
+code directly, not assumed.
+
+**Fixed (D-066/B-022):** added a single bounded retry when the fast
+path's first `retrieve()` call returns zero chunks. `src/main.py` +
+new `test_phase10_fast_path_retry.py` (12 checks). 285/285 full
+regression (up from 273/16 files).
+
+**Corrected in the same entry:** D-065's original "temperature=0.2 on
+the answerability re-check" claim was already known-wrong (corrected
+last session); this finding demotes D-065's remaining two suspects
+(synthesis temperature, retrieval content drift) from "the cause" to
+"secondary, unconfirmed, possibly still relevant" — this fast-path gap
+is now the primary confirmed explanation for both halves of the
+83.3%/50.0% and 10%/0% swings seen across multiple prior runs.
+
+**readme.md:** left as-is (still shows the honest 50-83.3% range and
+"tag pending" framing) — updating it to claim a fix worked before
+real-hardware confirmation would repeat the exact mistake Entry
+047/048 already made once.
+**Decisions/bugs logged:** D-066, B-022.
+**Regression status:** 285/285 across 17 sandbox-runnable test files.
+**Not yet done:** real-hardware confirmation. Next step is another
+back-to-back pair of `golden_set_eval.py` runs (same protocol as the
+one that found this) to check whether `"0 sources"` becomes rare and
+whether the false-premise/answerable numbers stop swinging as sharply.
+If they still swing meaningfully after this fix, that's real evidence
+D-065's secondary suspects need their own investigation next, not
+proof this fix failed.
+**Next action for next session:** run `golden_set_eval.py` twice
+back-to-back again, post-fix, and compare against this session's
+baseline (0-sources on 3/32 queries in one run). Also worth checking
+whether the agentic path's very first retrieval call has the same gap
+before its own sufficiency loop kicks in (flagged in D-066, not yet
+investigated).
 
 ### Entry 048
 **Phase:** 10, D-063 confirmed on real hardware; NEW variance finding (D-065) — v1.0 tag held

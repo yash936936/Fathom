@@ -2502,5 +2502,148 @@ with (not proof of) the throttle fix. Answerable false-positive
 refusal rate held at 0.0% across both new golden-set runs — genuinely
 stable so far, unlike the false-premise number.
 
+**CORRECTION (logged same session, before any fix was applied on the
+strength of the wrong claim):** the "Root cause" paragraph above is
+WRONG. I asserted `classify_answerability()`'s post-retrieval re-check
+runs at `temperature=0.2` without reading the actual function first.
+Checked directly against `src/verification/answerability.py`:
+
+```python
+raw = model.chat(
+    ...,
+    max_tokens=80,
+    temperature=0.0,  # deterministic classification, same rationale
+    # as domain_gate.classify_domain -- do not raise without logging
+    # why in decisions.md.
+)
+```
+
+Both the pre-check and the post-retrieval re-check are already
+deterministic. That path is not the source of the variance.
+
+**Actual root cause, traced through `golden_set_eval.py`'s own
+`_classify_result()`:** a query counts as "caught" via THREE distinct
+paths, not one — `"answerability"` (the deterministic check above),
+`"output_rail"` (an ambiguous-confidence answerability verdict lets
+synthesis proceed per D-045's fail-open design, and `output_rail`
+catches it afterward if synthesis produces an uncited answer), and
+`"zero_evidence"`. `rag/synthesis.py`'s `generate()` defaults to
+`temperature=0.3` — genuinely non-deterministic — so the SAME
+retrieved evidence can synthesize into a cited vs. uncited answer on
+different runs, changing whether `output_rail` catches it. Layered on
+top: queries 21/25/26 also go through live retrieval
+(`web_search`/`news_search`), which can itself return different
+results ~53 minutes apart for time-sensitive queries — a second real
+source of run-to-run difference in what evidence even reaches
+synthesis. Both are genuine, neither is `classify_answerability`'s
+temperature.
+
+**Why this matters:** Option 2 as originally written ("set
+`temperature=0.0` on the post-generation answerability re-check")
+would have been a no-op — that call was already deterministic — and
+implementing it would have given false confidence that the variance
+was fixed when the actual sources (synthesis temperature +
+live-retrieval variance) were untouched. Caught and corrected before
+any code change was made on the strength of the wrong claim.
+
+**Revised options, replacing the original two:**
+1. (Unchanged) Run `golden_set_eval.py` N times and report a range —
+   still valid regardless of root cause.
+2. Lower `synthesis.generate()`'s default temperature for this
+   specific call path, OR make `_classify_result()`/the eval harness
+   re-run only the affected borderline queries multiple times to
+   distinguish "genuinely ambiguous" from "flaky." Unlike the original
+   Option 2, this one is unverified as a real fix — it would need to
+   be tried and re-measured, not assumed to work.
+3. NEW: cache/pin retrieval results within a single eval run (or
+   across a short repeat-run window) so that citation/answerability
+   variance can be isolated from retrieval variance — right now the
+   two are confounded and it's not possible to tell how much each one
+   contributes.
+**Not yet decided. Not yet done.** This entry supersedes its own
+earlier "Root cause"/"Decision" paragraphs above — those are left in
+place per this project's own convention (never delete history), but
+should not be treated as current.
+
+---
+
+### D-066 (fixes B-022) — Fast path had no retry on empty retrieval; confirmed as the dominant driver of D-065's variance, not model sampling
+
+**Context:** user ran `golden_set_eval.py` twice back-to-back (~50 min
+apart, run 1 finishing right before run 2 started) specifically to
+separate retrieval variance from generation variance, per this
+session's ask. Result: **run 1 shows `"Generating answer from 0
+sources"` on queries 10, 25, and 28 — run 2 shows normal 5-8 sources on
+all three.** This is a completely mechanical, unambiguous signal (zero
+retrieved chunks), not a subtle sampling difference.
+
+**Root cause, confirmed against actual code
+(`src/main.py` line ~272-274, fast path):**
+```python
+report("Searching sources")
+retrieved = retrieve(query, debug_report=debug_report)
+chunks = rerank(retrieved, top_k=top_k, requires_recency=...)
+```
+Exactly one `retrieve()` call, no retry, no sufficiency check — unlike
+the agentic path (`rag/graph.py`), which has a sufficiency-check loop
+with up to 3 attempts (D-016 era work). `rag/retriever_hybrid.py`'s
+`retrieve()` fans out across 5 independent tools, each wrapped in its
+own try/except (D-033) so one tool failing doesn't fail the call — but
+if ALL 5 come back empty at once (a shared transient blip: DNS hiccup,
+momentary network interruption, etc.), there's nothing to catch that
+at a higher level. It falls straight through to `synthesis.generate()`'s
+hardcoded `zero_evidence` branch, producing an honest-but-wrong refusal
+for queries that are genuinely answerable.
+
+**This explains both halves of D-065's swing, not just one:**
+- Query 25 (Python discontinued, false_premise) hit 0 chunks in run 1
+  → refused, but for the WRONG reason (empty retrieval, not premise
+  detection) — it happened to land on the "caught" side of the
+  scoreboard by accident, inflating that run's catch rate.
+- Queries 10 and 28 (answerable/low_evidence) also hit 0 chunks in run
+  1 → wrongly refused, which is exactly why answerable false-positive
+  refusal rate spiked to 20% that same run.
+- Run 2, all three retrieved normally → catch rate and false-positive
+  rate both returned to their prior values.
+
+**This supersedes D-065's "revised options" list** — synthesis
+temperature and live-retrieval content drift (both flagged as
+co-suspects in D-065's correction) are not ruled out as smaller,
+secondary contributors, but this is confirmed as the dominant,
+first-order cause via two clean, mechanically-unambiguous data points.
+
+**Fix:** `src/main.py`'s fast path now retries `retrieve()` exactly
+once if the first call returns zero chunks, before falling through to
+generation. Bounded (single retry, not a loop) — a transient blip gets
+one more chance; a genuinely unfindable topic still correctly reaches
+the honest `zero_evidence` refusal after 2 attempts, same as before.
+Deliberately NOT matching the agentic path's full 3-attempt
+sufficiency-check loop — that loop also re-plans sub-queries via an
+LLM call, which is exactly the cost the fast path exists to avoid
+(D-027); a bare retry of the same query is the right scope for this
+path.
+
+**Files touched:** `src/main.py`, new `test_phase10_fast_path_retry.py`
+(12 checks: normal case unaffected, retry recovers from a transient
+empty result, retry is bounded to exactly one attempt when both calls
+fail, `debug_report` gets the retry notice only when a retry actually
+happens).
+**Verification:** 12/12 in the new test file; 285/285 across the full
+17 sandbox-runnable test files (up from 273/16 — this session added
+the new file).
+**Not yet done:** real-hardware confirmation. The next `golden_set_
+eval.py` run(s) should show `"Generating answer from 0 sources"`
+becoming rare-to-absent (a genuine double-failure is possible but
+should be much less common than a single transient one), and both
+false-premise catch rate and answerable false-positive refusal rate
+should show less swing between runs. If they still swing after this
+fix, that's real evidence for D-065's secondary suspects (synthesis
+temperature, retrieval content drift) actually mattering — worth
+re-running the same back-to-back-runs test to check.
+**Also worth doing, not done here:** the SAME zero-chunk-with-no-retry
+gap could in principle affect the agentic path's very first retrieval
+call too (before its own sufficiency loop kicks in) — not investigated
+this session, flagged for a follow-up look rather than assumed fine.
+
 ---
 **Return to `/context.md` for next steps.**

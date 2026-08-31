@@ -606,4 +606,41 @@ query types (or any query whose raw response happens to come back as
 a flat boolean array) is the actual confirmation this needs.
 
 ---
+
+### B-022 (see decisions.md D-066 for full context) — Fast path's `retrieve()` had no retry on a fully-empty result, causing intermittent wrongful refusals
+
+**Symptom (real hardware):** two back-to-back real `golden_set_eval.py`
+runs, same code: run 1 logged `"Generating answer from 0 sources"` on
+3 unrelated queries (10, 25, 28); run 2, ~50 minutes later, showed
+normal 5-8 sources on all three. Run 1's answerable false-positive
+refusal rate spiked to 20% and its false-premise catch rate hit a
+(spuriously) perfect 100% — both explained by the same 3 queries
+getting wrongly refused via an empty-evidence fallback.
+
+**Root cause:** `src/main.py`'s fast path called
+`rag.retriever_hybrid.retrieve()` exactly once. `retrieve()` fans out
+across 5 independently-caught tools (D-033), so a normal single-tool
+failure doesn't zero out the result — but nothing catches the case
+where all 5 return nothing at once (a shared transient network blip).
+That fell straight through to `synthesis.generate()`'s hardcoded
+`zero_evidence` branch, an honest-but-wrong refusal for an otherwise
+answerable query. The agentic path already has a multi-attempt
+sufficiency-check loop for exactly this class of problem; the fast
+path had nothing.
+
+**Fix:** one bounded retry -- if the first `retrieve()` call returns
+zero chunks, retry once (same query) before falling through to
+generation. Two consecutive full failures still correctly reaches the
+honest refusal; this isn't a way to force an answer out of nothing,
+just a way to not treat a blip as a genuine dead end.
+
+**Files touched:** `src/main.py`, new
+`test_phase10_fast_path_retry.py` (12 checks).
+**Verification:** 12/12 new tests; 285/285 full regression.
+**Not yet confirmed on real hardware** -- next step is another
+back-to-back pair of real `golden_set_eval.py` runs to check whether
+`"0 sources"` becomes rare and whether the false-premise/answerable
+metrics stop swinging as sharply.
+
+---
 **Return to `/context.md` for next steps.**
