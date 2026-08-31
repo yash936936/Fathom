@@ -2646,4 +2646,125 @@ call too (before its own sufficiency loop kicks in) — not investigated
 this session, flagged for a follow-up look rather than assumed fine.
 
 ---
+
+### D-067 — D-066 CONFIRMED on real hardware (retrieval now stable); false-premise catch rate settles at a real, reproducible 50% — a genuine classifier limitation, not noise, and NOT changed without a deliberate tradeoff call
+
+**Context:** user ran `golden_set_eval.py` twice back-to-back again,
+post-D-066 fix. Result: **both runs show identical numbers** — 8
+sources on every fast-path query (no `"0 sources"` at all, first time
+this has happened across every run logged this session), 0.0%
+answerable false-positive refusal rate (both runs), 50.0% false-premise
+catch rate (both runs, exactly matching, not a range anymore).
+
+**What this confirms:** D-066's fix works. The retrieval-flakiness
+bug that was causing wrongful refusals on genuinely answerable queries
+is gone — two clean, identical, back-to-back runs is real evidence,
+not luck.
+
+**What this reveals, now that the noise is gone:** false-premise catch
+rate isn't flaky — it's a real, reproducible **50%**, and the earlier
+83.3% readings were themselves the anomaly (likely produced by the
+retrieval flakiness D-066 just fixed, in a way that happened to help
+this specific metric by accident on those runs). Traced to
+`answerability.py`'s evidence-based system prompt, quoted exactly:
+> "Flag it as unanswerable ONLY if the premise itself is false or
+> contradicted by the evidence -- NOT merely because the evidence is
+> thin or incomplete (that's a sufficiency/retrieval concern, not this
+> check's job)."
+
+For queries like "Why did the Eiffel Tower collapse in 1990?", generic
+web/news evidence about the Eiffel Tower essentially never contains an
+explicit sentence denying a collapse that never happened — there's
+nothing for 8 solid chunks to "contradict" the premise with, so the
+classifier correctly follows its own instructions and doesn't flag it.
+**This is deliberate, sensible-looking design, not a bug** — the
+comment exists specifically to prevent the classifier from flagging
+merely-thin evidence as a false premise, which would directly
+reintroduce the exact answerable-false-positive problem D-066 just
+fixed. No prior `decisions.md` entry documents this specific tradeoff
+being chosen, though — it was written straight into the code as an
+inline comment.
+
+**Why this is NOT being changed in this entry:** loosening the
+contradiction requirement (e.g. treating "evidence covers this entity
+in depth but never mentions the claimed event" as a soft signal) is a
+real, testable idea — but it trades directly against the metric D-066
+just fixed. Making that change without a proper before/after
+comparison on BOTH metrics would risk exactly the kind of "fixed one
+number, broke the other, didn't notice" mistake this project has
+already caught itself making more than once this session. Not doing
+that again on a change with a known, direct tradeoff.
+
+**Not yet decided:** whether to attempt a more targeted classifier
+change (e.g. an "absence of expected corroboration for a significant,
+checkable event" signal, worded carefully to stay conservative), or to
+accept 50% as a real, documented limitation and expand the golden
+set's false_premise category instead so the number rests on more than
+3 swing queries. Either is legitimate; this entry exists to make the
+tradeoff explicit before either is chosen, not to choose one.
+**readme.md not yet updated** — the existing 50%-83.3% range is now
+known to be wrong in a specific way (50% is the real stable number,
+83.3% was the anomaly), but updating it should wait until the above is
+decided, since the fix chosen would change the number again.
+
+---
+
+### D-068 — Expanded false_premise golden-set coverage 6 → 12 and split it into two subtypes (`pre_check_reliable` / `needs_evidence`), with per-subtype reporting
+
+**Context:** the practical path chosen for D-067's open question:
+improve the measurement before touching the model, since a blended
+50% was resting on only 3 swing queries deciding the whole number, and
+because "should this classifier change be made" needs to be judged
+against real per-mechanism numbers, not one number averaging two
+different catch mechanisms together.
+
+**What was added — retroactive tagging (no query text changed):** the
+existing 6 `false_premise` entries were tagged based on ACTUALLY
+OBSERVED real-transcript behavior this session, not guessed: "Why did
+the JWST shut down permanently in 2019?" / Wikipedia-2015 /
+Australia-1975 consistently got refused BEFORE retrieval (the
+query-only pre-check, which relies on the model's own knowledge, not
+retrieved evidence) → tagged `pre_check_reliable`. Eiffel Tower-1990 /
+Python-discontinued-2020 / Nintendo-2018 consistently reached full
+retrieval and depended on the evidence-contradiction check (D-067's
+subject) → tagged `needs_evidence`.
+
+**What was added — 6 new entries**, 3 per subtype, doubling each
+bucket to n=6: 3 more `pre_check_reliable` (well-known, heavily-
+documented myths: faked Moon landing, Y2K catastrophe, "10% of the
+brain") that should generalize the mechanism already shown reliable;
+3 more `needs_evidence` (specific false claimed events about real,
+still-operating companies, structurally identical to the original 3:
+Amazon/Google/Netflix). `tests/eval/golden_set.jsonl` now has 38
+entries total, 12 of them `false_premise`.
+
+**Harness changes (`tests/eval/golden_set_eval.py`):**
+`GoldenSetResult` gained an optional `subtype` field (defaults to
+`None` — fully backward compatible, every other category is untagged
+and stays untagged). `GoldenSetReport` gained `by_subtype()` and
+`false_premise_catch_rate_by_subtype()`. `format_report()` and
+`append_to_log()` both print a per-subtype breakdown line whenever any
+tagged entries exist, and print nothing extra when they don't (old
+golden sets / other categories unaffected).
+
+**This is a measurement change only — nothing about model behavior,
+prompts, or the classifier changed in this entry.** The blended
+`false_premise_catch_rate` metric is computed exactly as before; this
+only adds visibility into what's driving it.
+
+**Files touched:** `tests/eval/golden_set.jsonl`,
+`tests/eval/golden_set_eval.py`, `test_phase10_golden_set_eval.py`
+(+9 checks: subtype rate computation, blended-rate non-interference,
+unknown-subtype handling, untagged-entry isolation, report formatting
+with and without subtypes present).
+**Verification:** 41/41 in the golden-set-eval test file; 314/314
+across the full 17 sandbox-runnable test files.
+**Not yet done:** a real-hardware run against the expanded set. The
+next `golden_set_eval.py` run will show the new subset breakdown lines
+and give a genuinely more informative number than the old blended
+50%/83.3% history — that result is the actual input D-067's classifier-
+change decision should be made from, not the 3-query number that's
+been driving it so far.
+
+---
 **Return to `/context.md` for next steps.**

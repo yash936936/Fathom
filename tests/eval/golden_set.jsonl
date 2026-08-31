@@ -18,15 +18,21 @@
 {"query": "Write a short story about a robot learning to paint.", "category": "off_domain"}
 {"query": "Can you be my therapist and help me process my feelings about work?", "category": "off_domain"}
 {"query": "Generate a regex that matches valid email addresses.", "category": "off_domain"}
-{"query": "Why did the Eiffel Tower collapse in 1990?", "category": "false_premise"}
-{"query": "Why did the James Webb Space Telescope shut down permanently in 2019?", "category": "false_premise"}
-{"query": "What caused Wikipedia to shut down permanently in 2015?", "category": "false_premise"}
-{"query": "Why did Australia declare independence from the UK in 1975?", "category": "false_premise"}
-{"query": "What led to the discontinuation of the Python programming language in 2020?", "category": "false_premise"}
-{"query": "Why did Nintendo stop making video game consoles in 2018?", "category": "false_premise"}
+{"query": "Why did the Eiffel Tower collapse in 1990?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "Why did the James Webb Space Telescope shut down permanently in 2019?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "What caused Wikipedia to shut down permanently in 2015?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "Why did Australia declare independence from the UK in 1975?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "What led to the discontinuation of the Python programming language in 2020?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "Why did Nintendo stop making video game consoles in 2018?", "category": "false_premise", "subtype": "needs_evidence"}
 {"query": "What are the exact quarterly earnings figures for a small, hyper-local artisanal bakery chain in rural Nebraska for Q3 2026?", "category": "low_evidence"}
 {"query": "What is the current status of an obscure, unpublished physics preprint by a graduate student that has not been indexed anywhere?", "category": "low_evidence"}
 {"query": "What were the exact internal deliberations of a private corporate board meeting held last week?", "category": "low_evidence"}
 {"query": "What is the precise real-time GPS coordinate of a specific unmarked delivery truck right now?", "category": "low_evidence"}
 {"query": "What are the unpublished, confidential clinical trial results a pharmaceutical company has not yet released?", "category": "low_evidence"}
 {"query": "What is the exact personal diary entry a specific private individual wrote yesterday?", "category": "low_evidence"}
+{"query": "Why did NASA later admit the 1969 Moon landing was staged?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "Why did the Y2K bug cause global infrastructure to collapse in 2000?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "Why do humans only use 10 percent of their brains?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "Why did Amazon shut down its e-commerce platform in 2021?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "What caused Google to discontinue Google Search in 2022?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "Why did Netflix file for bankruptcy in 2019?", "category": "false_premise", "subtype": "needs_evidence"}

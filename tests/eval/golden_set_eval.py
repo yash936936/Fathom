@@ -81,6 +81,11 @@ class GoldenSetResult:
     # judge_low_evidence_candidates() (D-060) to give the judge model
     # actual content to assess, not just the derived boolean flags.
     error: str | None = None
+    subtype: str | None = None  # per decisions.md D-068 -- optional,
+    # currently only populated for false_premise entries
+    # ("pre_check_reliable" vs "needs_evidence"), lets the report break
+    # a blended catch rate apart by which mechanism actually has to
+    # catch it, instead of hiding that distinction behind one number.
 
 
 @dataclass
@@ -89,6 +94,12 @@ class GoldenSetReport:
 
     def by_category(self, category: str) -> list[GoldenSetResult]:
         return [r for r in self.results if r.category == category and r.error is None]
+
+    def by_subtype(self, category: str, subtype: str) -> list[GoldenSetResult]:
+        return [
+            r for r in self.results
+            if r.category == category and r.subtype == subtype and r.error is None
+        ]
 
     @property
     def off_domain_refusal_rate(self) -> float | None:
@@ -100,6 +111,12 @@ class GoldenSetReport:
     @property
     def false_premise_catch_rate(self) -> float | None:
         entries = self.by_category("false_premise")
+        if not entries:
+            return None
+        return sum(1 for r in entries if r.refused) / len(entries)
+
+    def false_premise_catch_rate_by_subtype(self, subtype: str) -> float | None:
+        entries = self.by_subtype("false_premise", subtype)
         if not entries:
             return None
         return sum(1 for r in entries if r.refused) / len(entries)
@@ -212,7 +229,7 @@ def run_golden_set(
                     query=query, category=category, refused=refused, refusal_type=refusal_type,
                     has_citations=bool(_CITATION_TAG_PATTERN.search(answer)),
                     has_low_confidence_caveat=bool(_LOW_CONFIDENCE_CAVEAT_PATTERN.search(answer)),
-                    flags=flags, answer=answer,
+                    flags=flags, answer=answer, subtype=entry.get("subtype"),
                 )
             )
         except Exception as exc:  # noqa: BLE001 -- one bad query must not
@@ -222,6 +239,7 @@ def run_golden_set(
                 GoldenSetResult(
                     query=query, category=category, refused=False, refusal_type=None,
                     has_citations=False, has_low_confidence_caveat=False, flags=[], error=str(exc),
+                    subtype=entry.get("subtype"),
                 )
             )
     return golden_report
@@ -240,6 +258,19 @@ def format_report(golden_report: GoldenSetReport) -> str:
 
     fpr = golden_report.false_premise_catch_rate
     lines.append(f"  false-premise catch rate: {f'{fpr:.1%}' if fpr is not None else 'N/A'} (no formal prd.md threshold, tracked as a hallucination-adjacent signal)")
+
+    # Per decisions.md D-068: a single blended false-premise number
+    # hides that pre_check_reliable and needs_evidence are caught by
+    # two different mechanisms with very different real reliability --
+    # break it apart whenever the golden set has subtype-tagged entries.
+    for subtype, label in (
+        ("pre_check_reliable", "pre-check-reliable"),
+        ("needs_evidence", "needs-evidence"),
+    ):
+        rate = golden_report.false_premise_catch_rate_by_subtype(subtype)
+        if rate is not None:
+            n = len(golden_report.by_subtype("false_premise", subtype))
+            lines.append(f"    -- {label} subset (n={n}): {rate:.1%}")
 
     afp = golden_report.answerable_false_positive_refusal_rate
     lines.append(f"  answerable false-positive refusal rate: {f'{afp:.1%}' if afp is not None else 'N/A'} (lower is better -- 0% is ideal)")
@@ -263,6 +294,15 @@ def append_to_log(golden_report: GoldenSetReport, hardware_note: str = "(unspeci
     fpr = golden_report.false_premise_catch_rate
     afp = golden_report.answerable_false_positive_refusal_rate
     candidates = golden_report.low_evidence_review_candidates
+    subtype_lines = ""
+    for subtype, label in (
+        ("pre_check_reliable", "pre-check-reliable"),
+        ("needs_evidence", "needs-evidence"),
+    ):
+        rate = golden_report.false_premise_catch_rate_by_subtype(subtype)
+        if rate is not None:
+            n = len(golden_report.by_subtype("false_premise", subtype))
+            subtype_lines += f"  - {label} subset (n={n}): {rate:.1%}\n"
     entry = (
         f"\n### {timestamp} (Golden set eval, D-059, Phase 10)\n"
         f"**Hardware:** {hardware_note}\n"
@@ -271,6 +311,7 @@ def append_to_log(golden_report: GoldenSetReport, hardware_note: str = "(unspeci
         f"**Off-domain refusal rate:** {f'{odr:.1%}' if odr is not None else 'N/A'} "
         f"(prd.md threshold: >={PRD_REFUSAL_RATE_THRESHOLD:.0%})\n"
         f"**False-premise catch rate:** {f'{fpr:.1%}' if fpr is not None else 'N/A'}\n"
+        f"{subtype_lines}"
         f"**Answerable false-positive refusal rate:** {f'{afp:.1%}' if afp is not None else 'N/A'}\n"
         f"**Low-evidence review candidates:** {len(candidates)}/"
         f"{len(golden_report.by_category('low_evidence'))} "

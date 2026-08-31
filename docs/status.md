@@ -7,6 +7,16 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 050): D-066 CONFIRMED on real hardware** -- two more
+  back-to-back real runs, both identical, zero `"0 sources"`
+  occurrences, 0.0% answerable false-positive both times. **False-
+  premise catch rate is now known to be a real, stable 50%** (not
+  83.3% -- that was the retrieval-flakiness artifact D-066 fixed).
+  Root-caused to a real, sensible-but-undocumented design tradeoff in
+  `answerability.py` (D-067) -- NOT yet decided whether to change it,
+  since doing so trades directly against the metric D-066 just fixed.
+  `readme.md`'s numbers are known-stale in a specific way but
+  deliberately not yet updated pending that decision.
 - **UPDATE (Entry 049): ROOT CAUSE FOUND AND FIXED (D-066/B-022)** --
   a targeted back-to-back pair of real `golden_set_eval.py` runs
   (requested specifically to separate retrieval variance from
@@ -126,6 +136,74 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 051
+**Phase:** 10, practical next step chosen for D-067: improve measurement before touching the model
+**Action taken:** per explicit direction ("practical but best possible
+outcome"), chose to expand and split the golden set's `false_premise`
+coverage BEFORE attempting any classifier change — the 50%/83.3%
+history was resting on only 3 swing queries, too small to trust either
+as a target to fix toward.
+
+**Done (D-068):** retroactively tagged the existing 6 `false_premise`
+entries by ACTUALLY OBSERVED behavior this session (not guessed) —
+3 consistently caught pre-retrieval (`pre_check_reliable`), 3
+consistently reach full retrieval and depend on the evidence-
+contradiction check (`needs_evidence`, D-067's actual subject). Added
+6 new entries, 3 per subtype, doubling each bucket to n=6. Golden set
+is now 38 entries, 12 `false_premise`. `golden_set_eval.py` now
+reports and logs a per-subtype breakdown alongside the blended rate.
+**This is measurement-only — no model, prompt, or classifier behavior
+changed.**
+**Decisions logged:** D-068.
+**Regression status:** 314/314 across 17 sandbox-runnable test files
+(up from 285 — +9 new checks for the subtype logic).
+**Not yet done:** a real-hardware run against the expanded set. This
+is the actual next step — the resulting per-subtype numbers are what
+D-067's classifier-change decision should be made from.
+**Next action for next session:** run `golden_set_eval.py` (plain is
+enough; `--with-judge` optional) once, read the new
+`pre-check-reliable subset` / `needs-evidence subset` lines, and use
+those — not the old blended history — to decide whether a targeted
+classifier change is worth the tradeoff risk flagged in D-067.
+
+### Entry 050
+**Phase:** 10, D-066 CONFIRMED on real hardware; false-premise catch rate revealed as a real 50%, not noise — tradeoff decision needed, not made yet
+**Action taken:** user ran the exact same back-to-back
+`golden_set_eval.py` protocol again, post-D-066.
+
+**D-066 confirmed:** both runs identical — 8 sources on every
+fast-path query, zero `"0 sources"` occurrences (first time that's
+been clean across every run logged this session), 0.0% answerable
+false-positive refusal rate both times. Real, repeatable evidence the
+retry fix works.
+
+**New understanding, not a new problem:** false-premise catch rate is
+now a stable, reproducible 50% (both runs identical) — not the 83.3%
+this project had been treating as the "good" number. Root-caused to
+`answerability.py`'s evidence-based prompt deliberately requiring the
+evidence to CONTRADICT the premise, not just fail to support it — a
+sensible-looking design choice that was never actually logged as a
+decision until now (D-067). For queries like "Why did the Eiffel Tower
+collapse in 1990?", generic retrieved evidence essentially never
+contains an explicit denial of something that didn't happen, so there's
+nothing to contradict with, and the classifier correctly follows its
+own (undocumented-until-now) instructions.
+**Decision NOT made this entry:** whether to loosen that check. Doing
+so directly trades against the answerable-false-positive metric D-066
+just fixed — changing it without a real before/after test on both
+metrics would repeat a mistake this session already made once.
+**Decisions logged this run:** D-067.
+**readme.md:** intentionally NOT updated yet — the 50%-83.3% range
+is now known to be wrong in a specific direction (50% is real, 83.3%
+was the retrieval-flakiness artifact), but updating it before the
+tradeoff decision above is made would mean rewriting it twice.
+**Next action for next session:** decide between (a) a targeted,
+carefully-worded classifier change with a proper before/after
+comparison on BOTH metrics, or (b) accepting 50% as a documented real
+limitation and expanding the golden set's false_premise category
+(currently only 6 queries, 3 of which drive this entire number) for a
+more stable measurement either way.
 
 ### Entry 049
 **Phase:** 10, requested back-to-back diagnostic run isolated the real root cause; fixed and tested
