@@ -50,10 +50,24 @@ niche question -- but the premise itself is fine).
 
 _SYSTEM_PROMPT_WITH_EVIDENCE = """You check whether a research question \
 rests on a false premise, using the retrieved evidence below as \
-context. Flag it as unanswerable ONLY if the premise itself is false or \
-contradicted by the evidence -- NOT merely because the evidence is thin \
-or incomplete (that's a sufficiency/retrieval concern, not this check's \
-job).
+context.
+
+Flag it as unanswerable (answerable=false) if EITHER:
+1. The evidence directly contradicts the premise, OR
+2. The evidence discusses the same subject in real depth (recent \
+status, history, current operations) but never once corroborates the \
+specific event the question describes -- and that event, if true, \
+would be significant enough that substantial evidence would very \
+likely mention it (e.g. a major landmark collapsing, a well-known \
+company shutting down, a widely-used product being discontinued).
+
+Criterion 2 is NOT the same as "evidence is thin" -- it requires \
+substantial evidence ABOUT THE SUBJECT that is conspicuously silent \
+on the ONE specific claim being asked about. Do NOT flag it merely \
+because the evidence overall is sparse, incomplete, or barely \
+touches the topic -- that is a retrieval/sufficiency concern, not \
+this check's job, and should be answered normally or left to the \
+sufficiency check.
 
 Respond with ONLY a JSON object, no other text:
 {"answerable": true or false, "confidence": a number from 0.0 to 1.0, \

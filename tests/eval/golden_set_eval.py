@@ -132,6 +132,23 @@ class GoldenSetReport:
         return sum(1 for r in entries if r.refused) / len(entries)
 
     @property
+    def answerable_false_positive_candidates(self) -> list[GoldenSetResult]:
+        """Per decisions.md D-069: the rate alone doesn't say WHICH
+        query got wrongly refused, forcing a re-run with --debug just
+        to find out. List them directly so a single run is enough to
+        both measure and diagnose."""
+        return [r for r in self.by_category("answerable") if r.refused]
+
+    @property
+    def false_premise_missed_candidates(self) -> list[GoldenSetResult]:
+        """Per decisions.md D-069: the false_premise entries that were
+        NOT caught -- i.e. the query went through unrefused. Listed
+        directly (with subtype, when tagged) so a single run shows
+        exactly which premises are slipping through, not just how
+        many."""
+        return [r for r in self.by_category("false_premise") if not r.refused]
+
+    @property
     def low_evidence_review_candidates(self) -> list[GoldenSetResult]:
         """low_evidence entries with NEITHER a citation NOR a
         low-confidence caveat -- see module docstring's honesty note.
@@ -272,8 +289,22 @@ def format_report(golden_report: GoldenSetReport) -> str:
             n = len(golden_report.by_subtype("false_premise", subtype))
             lines.append(f"    -- {label} subset (n={n}): {rate:.1%}")
 
+    # Per decisions.md D-069: list exactly which false_premise entries
+    # slipped through, not just the aggregate rate -- diagnosing what's
+    # actually failing used to require a separate --debug re-run.
+    missed = golden_report.false_premise_missed_candidates
+    for r in missed:
+        subtype_note = f", subtype={r.subtype}" if r.subtype else ""
+        lines.append(f"    -- MISSED: {r.query!r}{subtype_note}")
+
     afp = golden_report.answerable_false_positive_refusal_rate
     lines.append(f"  answerable false-positive refusal rate: {f'{afp:.1%}' if afp is not None else 'N/A'} (lower is better -- 0% is ideal)")
+
+    # Per decisions.md D-069: same reasoning -- name the specific
+    # query(ies) wrongly refused, not just the percentage.
+    afp_candidates = golden_report.answerable_false_positive_candidates
+    for r in afp_candidates:
+        lines.append(f"    -- WRONGLY REFUSED: {r.query!r} (refusal_type={r.refusal_type})")
 
     candidates = golden_report.low_evidence_review_candidates
     lines.append(f"  low-evidence queries needing human review: {len(candidates)}/{len(golden_report.by_category('low_evidence'))}")

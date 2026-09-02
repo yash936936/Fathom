@@ -84,6 +84,53 @@ msg_without_reason = refusal_message("")
 check("refusal_message includes reason when given", "the event never happened" in msg_with_reason)
 check("refusal_message is still a sensible sentence with empty reason", msg_without_reason.startswith("This question appears"))
 
+# --- Test 9 (D-069): the evidence-based prompt now has TWO flagging
+# criteria, not one -- confirm both are actually present, since real-
+# hardware runs showed the original single-criterion version had a
+# 0/5 real catch rate whenever a false premise reached this check.
+# Import the module directly to inspect the actual prompt text sent to
+# the model, not a paraphrase of it. ---
+from verification import answerability as answerability_module  # noqa: E402
+
+prompt_text = answerability_module._SYSTEM_PROMPT_WITH_EVIDENCE
+check("D-069: criterion 1 (direct contradiction) still present", "contradicts the premise" in prompt_text)
+check(
+    "D-069: criterion 2 (substantial-but-silent evidence) is new and present",
+    "never once corroborates the" in prompt_text,
+)
+
+# --- Test 10 (D-069): the ORIGINAL protection against flagging merely
+# thin evidence must survive this change verbatim in spirit -- this is
+# the exact regression risk flagged in decisions.md D-067/D-069. If a
+# future edit accidentally drops this line while chasing a better
+# catch rate, this test should fail. ---
+check(
+    "D-069: original thin-evidence protection is still present, not silently dropped",
+    "sparse, incomplete, or barely" in prompt_text and "retrieval/sufficiency concern" in prompt_text,
+)
+
+# --- Test 11 (D-069): criterion 2 is explicitly scoped to SUBSTANTIAL
+# evidence, not "any" evidence -- confirm the distinguishing word is
+# actually in the prompt, since this exact distinction is what's
+# supposed to prevent criterion 2 from degrading into "flag anything
+# thin," which would reintroduce the D-066 answerable-false-positive
+# problem this change is deliberately trying not to cause. ---
+check(
+    "D-069: criterion 2 explicitly requires SUBSTANTIAL evidence about the subject, not just any evidence",
+    "substantial evidence" in prompt_text.lower(),
+)
+
+# --- Test 12: classify_answerability's actual call mechanics are
+# unchanged by this prompt edit -- still parses the same JSON shape,
+# still uses the evidence-aware prompt only when chunks are given. ---
+chunk12: RetrievedChunk = {
+    "source_id": "web:0", "source": "Test", "content": "Some real content.", "url": None,
+}
+model12 = StubModel('{"answerable": false, "confidence": 0.8, "reason": "no corroboration found"}')
+verdict12 = check_answerability("Did X happen?", model12, chunks=[chunk12])
+check("D-069: evidence-aware path still parses a false verdict correctly", verdict12.answerable is False)
+check("D-069: evidence-aware path still carries the reason through", verdict12.reason == "no corroboration found")
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

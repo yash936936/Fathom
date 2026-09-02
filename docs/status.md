@@ -137,6 +137,45 @@
 
 ## Log (newest first)
 
+### Entry 052
+**Phase:** 10, D-068's expanded run showed the evidence-based check has a 0/5 real catch rate -- fixed with a scoped second criterion + per-query diagnostics; classifier prompt touched for the first time this session
+**Action taken:** user ran `golden_set_eval.py` against the expanded
+38-entry set. Traced all 12 false_premise entries individually: 7/7
+caught via the pre-check, 0/5 caught via the evidence-based
+post-retrieval check -- every single query that ever reached that
+mechanism, across this entire session's runs, has slipped through.
+Also caught (and explicitly flagged as separate, not conflated): this
+run's answerable false-positive rate was 10.0%, up from 0.0% twice
+post-D-066, with all 10 answerable queries retrieving fine -- a
+different, still-unidentified failure path, NOT yet root-caused.
+
+**D-069:** given the 0/5 finding, the earlier "don't touch it, real
+tradeoff risk" caution from D-067 no longer applies in the same way --
+there's very little real catch behavior left to protect. Added a
+second, narrowly-scoped criterion to `answerability.py`'s evidence
+prompt (substantial-but-silent evidence, explicitly NOT thin evidence)
+while preserving the original protective wording near-verbatim. Also
+added diagnostic reporting to `golden_set_eval.py` so the next run
+names exactly which queries fail, closing the "10% but which query?"
+gap directly.
+**This is an experiment, explicitly flagged as such** -- unverified
+against real generation, with two things to check on the next run, not
+one: does the false-premise catch rate improve, AND does the
+answerable false-positive rate stay near 0% (not just "did this
+change break it" but also resolving the pre-existing, differently-
+caused 10% from THIS run).
+**Decisions logged:** D-069.
+**Regression status:** 320/320 across 17 sandbox-runnable test files
+(up from 314 — +13 answerability tests, +5 golden-set-eval tests).
+**Not yet done:** the real-hardware run. Root-causing this run's 10%
+answerable false-positive is also still open — expected to be
+surfaced directly by the new diagnostic lines on the next run.
+**Next action for next session:** run `golden_set_eval.py` once more,
+read the new `MISSED:` and `WRONGLY REFUSED:` lines directly (no
+separate --debug run needed), and report back both the subtype rates
+AND whichever specific queries show up in those two new diagnostic
+lines.
+
 ### Entry 051
 **Phase:** 10, practical next step chosen for D-067: improve measurement before touching the model
 **Action taken:** per explicit direction ("practical but best possible

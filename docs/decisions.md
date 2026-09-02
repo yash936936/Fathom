@@ -2767,4 +2767,85 @@ change decision should be made from, not the 3-query number that's
 been driving it so far.
 
 ---
+
+### D-069 — D-068's expanded run revealed the evidence-based false-premise check has a 0/5 REAL catch rate, not a soft weakness; fixed with a second, narrowly-scoped criterion, plus per-query diagnostic reporting
+
+**Context:** the first real run against D-068's expanded golden set
+(38 entries, 12 false_premise, subtype-tagged). Traced every one of
+the 12 false_premise queries individually against the transcript
+(not just the two subset percentages):
+
+| Outcome | Queries | Count |
+|---|---|---|
+| Caught by the query-only PRE-check | JWST-2019, Wikipedia-2015, Australia-1975, NASA-moon-staged, Amazon-shutdown, Google-Search-discontinued, Netflix-bankruptcy | 7/7 |
+| Reached full retrieval, evaluated by the EVIDENCE-based check | Eiffel Tower, Python-discontinued, Nintendo-2018, Y2K-collapse, 10%-brain-myth | 0/5 |
+
+**This is a materially stronger finding than D-067's framing.** Every
+catch, in every run this session, has come from the pre-retrieval
+check. The evidence-based re-check has never once fired on a genuine
+false premise across 5 distinct queries and multiple runs -- this
+isn't "50% reliability," it's a mechanism that doesn't work in
+practice. That changes the earlier caution in D-067 (leave it alone,
+real tradeoff risk) -- there's very little left to protect in a
+mechanism contributing zero real catches.
+
+**Also found, not ignored:** this same run's answerable
+false-positive refusal rate was 10.0% (up from 0.0% twice in a row
+post-D-066), even though the transcript shows all 10 answerable
+queries retrieved 8 sources successfully. Since D-066 only fixes the
+retrieval-empty failure mode, this points at a DIFFERENT, still-open
+failure path -- almost certainly the same evidence-based check
+(over-)firing on a genuinely answerable query. **Not yet root-caused**
+-- the transcript alone doesn't say which query, which is exactly the
+gap the diagnostic reporting below closes for the next run.
+
+**Fix 1 — `answerability.py`'s evidence-based prompt.** Added a second
+criterion alongside the original "evidence directly contradicts the
+premise" one: flag it if the evidence covers the SUBJECT in real depth
+but never once corroborates the SPECIFIC claimed event, when that
+event would be significant enough to expect corroboration if true.
+Explicitly and repeatedly scoped in the prompt text itself to NOT
+apply to merely-thin-overall evidence (the exact case the original
+wording protected against, and the exact case D-066 already had to
+fix once when it went wrong via a different mechanism). The original
+protective sentence is preserved near-verbatim, not replaced.
+
+**Fix 2 — diagnostic reporting (`golden_set_eval.py`).** Added
+`answerable_false_positive_candidates` and
+`false_premise_missed_candidates` properties, both surfaced in
+`format_report()`: the next run will show WHICH query was wrongly
+refused or missed, by name, in the normal report -- no more needing a
+separate `--debug` re-run just to find out. This directly targets the
+"10% but which query?" gap above.
+
+**This is explicitly an experiment, not a confirmed fix.** The prompt
+change is a reasonable, carefully-scoped design given the 0/5 finding,
+but it is UNVERIFIED against real generation until the next real run.
+Two things must both be checked on that run, not just the one this
+change targets:
+1. Does the `needs_evidence` / `pre_check_reliable` catch rate improve
+   on Eiffel/Python/Nintendo/Y2K/10%-brain?
+2. Does `answerable_false_positive_refusal_rate` stay at or near 0% --
+   i.e. does criterion 2 stay scoped to "substantial but silent"
+   evidence and NOT start flagging genuinely-thin-but-answerable
+   queries? This is the exact regression D-067 was worried about, and
+   this run already showed 10% false-positives from a DIFFERENT cause
+   before this change was even made -- so a bad number on the next run
+   needs care to attribute correctly, not just blamed on this prompt
+   edit by default.
+
+**Files touched:** `src/verification/answerability.py`,
+`test_phase6_answerability.py` (+13 checks: both criteria present,
+original protection preserved verbatim, "substantial" scoping present,
+parsing mechanics unchanged), `tests/eval/golden_set_eval.py` (+2
+properties, +2 report sections), `test_phase10_golden_set_eval.py`
+(+5 checks).
+**Verification:** 21/21 answerability tests, 46/46 golden-set-eval
+tests, 320/320 across the full 17 sandbox-runnable test files.
+**Not yet done:** the actual real-hardware run this entire entry is
+waiting on. Also not yet done: root-causing this run's 10%
+answerable-false-positive BEFORE this change, which the new diagnostic
+reporting should surface on the very next run regardless of outcome.
+
+---
 **Return to `/context.md` for next steps.**

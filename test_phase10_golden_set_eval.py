@@ -264,6 +264,24 @@ no_subtype_report = GoldenSetReport(results=[
 formatted_no_subtypes = format_report(no_subtype_report)
 check("D-068: format_report omits subtype lines cleanly when nothing is tagged", "subset (n=" not in formatted_no_subtypes)
 
+# --- Test 16 (D-069): named diagnostic candidates -- WHICH query
+# failed, not just how many. Real-hardware runs showed the aggregate
+# rate alone forced a separate --debug re-run just to find out which
+# query was the problem; these list them directly in one run. ---
+diag_report = GoldenSetReport(results=[
+    GoldenSetResult(query="Answerable Q that got wrongly refused", category="answerable", refused=True, refusal_type="answerability", has_citations=False, has_low_confidence_caveat=False, flags=[]),
+    GoldenSetResult(query="Answerable Q that worked fine", category="answerable", refused=False, refusal_type=None, has_citations=True, has_low_confidence_caveat=False, flags=[]),
+    GoldenSetResult(query="False premise that slipped through", category="false_premise", refused=False, refusal_type=None, has_citations=True, has_low_confidence_caveat=False, flags=[], subtype="needs_evidence"),
+    GoldenSetResult(query="False premise correctly caught", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="pre_check_reliable"),
+])
+check("D-069: answerable_false_positive_candidates lists exactly the wrongly-refused one", [r.query for r in diag_report.answerable_false_positive_candidates] == ["Answerable Q that got wrongly refused"])
+check("D-069: false_premise_missed_candidates lists exactly the one that slipped through", [r.query for r in diag_report.false_premise_missed_candidates] == ["False premise that slipped through"])
+
+formatted_diag = format_report(diag_report)
+check("D-069: format_report shows the WRONGLY REFUSED line with the actual query text", "WRONGLY REFUSED: 'Answerable Q that got wrongly refused'" in formatted_diag)
+check("D-069: format_report shows the MISSED line with the actual query text and subtype", "MISSED: 'False premise that slipped through', subtype=needs_evidence" in formatted_diag)
+check("D-069: format_report does NOT list queries that behaved correctly", "worked fine" not in formatted_diag and "correctly caught" not in formatted_diag)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")
