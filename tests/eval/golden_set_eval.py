@@ -223,12 +223,20 @@ def run_golden_set(
     mode: str = "deep",
     top_k: int = 8,
     report=None,
+    debug_report=None,
 ) -> GoldenSetReport:
     """Runs every entry through the REAL front door (main.run_query --
     domain_gate -> router -> path), not a forced-agentic shortcut like
     citation_accuracy_eval.py uses. That distinction matters here
     specifically: off_domain and false_premise detection both depend on
     the gates a forced-agentic run would bypass.
+
+    `debug_report`, if given (per decisions.md D-072), is forwarded to
+    `run_query` exactly like the interactive CLI's `--debug` flag --
+    surfaces things like D-066's retrieval-retry notice and D-071's
+    citation-retry notice, so diagnosing WHY a specific golden-set
+    query failed no longer requires a separate single-query CLI
+    re-run; it shows up in this same run's stderr.
     """
     golden_report = GoldenSetReport()
     for i, entry in enumerate(entries, 1):
@@ -239,6 +247,7 @@ def run_golden_set(
             answer, _sources, flags, _streamed = run_query(
                 query, model, mode=mode, max_tokens=512, top_k=top_k,
                 report=report or (lambda _msg: None), stream_tokens=False,
+                debug_report=debug_report,
             )
             refused, refusal_type = _classify_result(answer, flags)
             golden_report.results.append(
@@ -470,8 +479,15 @@ def main() -> int:
         print(f"golden_set_eval: {exc}", file=sys.stderr)
         return 2
 
+    # Per decisions.md D-072: --debug forwards run_query's own debug
+    # messages (D-066's retrieval-retry notice, D-071's citation-retry
+    # notice, etc.) to stderr, same as the interactive CLI's --debug --
+    # lets a specific golden-set failure be diagnosed in this same run
+    # instead of needing a separate single-query re-run to find out.
+    debug_report = (lambda msg: print(f"  [debug] {msg}", file=sys.stderr)) if "--debug" in sys.argv[1:] else None
+
     entries = load_golden_set()
-    golden_report = run_golden_set(entries, model, report=lambda msg: print(msg, file=sys.stderr))
+    golden_report = run_golden_set(entries, model, report=lambda msg: print(msg, file=sys.stderr), debug_report=debug_report)
     print(format_report(golden_report))
     append_to_log(golden_report)
     print(f"\nLogged to {_LOG_PATH}")
@@ -497,8 +513,10 @@ def main_with_judge() -> int:
         print(f"golden_set_eval --with-judge: {exc}", file=sys.stderr)
         return 2
 
+    debug_report = (lambda msg: print(f"  [debug] {msg}", file=sys.stderr)) if "--debug" in sys.argv[1:] else None
+
     entries = load_golden_set()
-    golden_report = run_golden_set(entries, model, report=lambda msg: print(msg, file=sys.stderr))
+    golden_report = run_golden_set(entries, model, report=lambda msg: print(msg, file=sys.stderr), debug_report=debug_report)
     print(format_report(golden_report))
     append_to_log(golden_report)
 

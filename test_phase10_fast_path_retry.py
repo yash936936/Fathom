@@ -158,7 +158,9 @@ def _debug_report(msg):
 
 call_count["n"] = 0
 main_module.retrieve = _retrieve_empty_then_success
-main_module.generate = lambda *a, **kw: ("ok", [])
+main_module.generate = lambda *a, **kw: ("ok [web:0]", [])  # includes a
+# citation marker so this test (checking the RETRIEVAL retry notice
+# specifically) doesn't spuriously also trigger D-071's citation retry
 call_count["n"] = 0
 debug_messages.clear()
 main_module.run_query(
@@ -192,6 +194,98 @@ main_module.run_query(
 check(
     "B-022: debug_report does NOT get a retry notice when the first call already succeeded",
     not any("retrying once" in m for m in debug_messages),
+)
+
+# --- Test 5 (D-071): synthesis answers with NO citation brackets on
+# the first attempt, real citations on the retry -- confirm the
+# no-citation-markers retry kicks in and the final answer is the
+# retried (cited) one, not the uncited first attempt. ---
+main_module.retrieve = _retrieve_success
+generate_call_count = {"n": 0}
+
+
+def _generate_no_citation_then_cited(query, chunks, model, **kwargs):
+    generate_call_count["n"] += 1
+    if generate_call_count["n"] == 1:
+        return ("The transistor was invented in 1947 at Bell Labs.", [])  # no [source_id] tag
+    return ("The transistor was invented in 1947 at Bell Labs. [web:0]", [])
+
+
+main_module.generate = _generate_no_citation_then_cited
+call_log.clear()
+generate_call_count["n"] = 0
+answer, sources, flags, streamed = main_module.run_query(
+    "What year was the transistor invented?",
+    StubModel(),
+    mode="quick",
+    max_tokens=256,
+    top_k=8,
+    report=lambda *a, **kw: None,
+    stream_tokens=False,
+)
+check("D-071: generate() is called exactly twice (initial + one citation retry)", generate_call_count["n"] == 2)
+check("D-071: final answer is the retried (cited) version, not the uncited first attempt", "[web:0]" in answer)
+
+# --- Test 6 (D-071): BOTH attempts come back with no citation markers
+# -- should still fall through to the honest output_rail refusal, not
+# retry forever. Exactly 2 generate() calls, not 3+. ---
+generate_call_count["n"] = 0
+
+
+def _generate_never_cites(query, chunks, model, **kwargs):
+    generate_call_count["n"] += 1
+    return ("An answer with no citations at all.", [])
+
+
+main_module.generate = _generate_never_cites
+answer, sources, flags, streamed = main_module.run_query(
+    "What year was the transistor invented?",
+    StubModel(),
+    mode="quick",
+    max_tokens=256,
+    top_k=8,
+    report=lambda *a, **kw: None,
+    stream_tokens=False,
+)
+check("D-071: exactly 2 generate() calls when both attempts lack citations (bounded retry, not a loop)", generate_call_count["n"] == 2)
+check("D-071: still reaches the honest output_rail refusal when both attempts fail", "failed output safety" in answer)
+
+# --- Test 7 (D-071): the retry must NOT fire when the answer already
+# streamed live to the user -- can't silently un-print already-shown
+# tokens. Confirm generate() is called exactly ONCE even when the
+# first (streamed) attempt has no citation markers. ---
+generate_call_count["n"] = 0
+main_module.generate = _generate_never_cites
+answer, sources, flags, streamed = main_module.run_query(
+    "What year was the transistor invented?",
+    StubModel(),
+    mode="quick",
+    max_tokens=256,
+    top_k=8,
+    report=lambda *a, **kw: None,
+    stream_tokens=True,
+)
+check("D-071: NO retry when the first attempt was already streamed live (can't un-print it)", generate_call_count["n"] == 1)
+check("D-071: streamed-mode still reaches the honest refusal, not a silently-broken answer", "failed output safety" in answer)
+
+# --- Test 8 (D-071): debug_report gets the citation-retry notice only
+# when that specific retry actually fires. ---
+debug_messages.clear()
+generate_call_count["n"] = 0
+main_module.generate = _generate_no_citation_then_cited
+main_module.run_query(
+    "What year was the transistor invented?",
+    StubModel(),
+    mode="quick",
+    max_tokens=256,
+    top_k=8,
+    report=lambda *a, **kw: None,
+    stream_tokens=False,
+    debug_report=_debug_report,
+)
+check(
+    "D-071: debug_report receives the citation-retry notice",
+    any("no citation markers" in m for m in debug_messages),
 )
 
 main_module.retrieve = original_retrieve

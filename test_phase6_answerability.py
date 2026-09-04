@@ -131,6 +131,24 @@ verdict12 = check_answerability("Did X happen?", model12, chunks=[chunk12])
 check("D-069: evidence-aware path still parses a false verdict correctly", verdict12.answerable is False)
 check("D-069: evidence-aware path still carries the reason through", verdict12.reason == "no corroboration found")
 
+# --- Test 13 (D-070): per-chunk evidence truncation raised 200 -> 500
+# chars. Real-hardware runs showed D-069's criterion 2 never fired on
+# its primary targets because the check literally couldn't see enough
+# of each source to judge "substantial" coverage. Confirm the actual
+# formatted evidence sent to the model reflects the new length, not
+# the old one -- this is exactly the kind of thing a future "let's
+# tidy this up" edit could silently revert without noticing why it
+# mattered. ---
+from verification.answerability import _format_evidence  # noqa: E402
+
+long_content = "X" * 800  # longer than both the old (200) and new (500) limits
+chunk13: RetrievedChunk = {
+    "source_id": "web:0", "source": "Test Source", "content": long_content, "url": None,
+}
+formatted13 = _format_evidence([chunk13])
+check("D-070: evidence formatting now includes MORE than the old 200-char limit", len(formatted13) > 200 + len("- Test Source: "))
+check("D-070: evidence formatting is truncated at exactly 500 chars, not left unbounded", "X" * 500 in formatted13 and "X" * 501 not in formatted13)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

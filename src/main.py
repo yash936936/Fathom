@@ -348,6 +348,37 @@ def run_query(
     out_result = output_rail(answer, require_citations=bool(chunks))
     flags = state.get("guardrail_flags", []) + out_result.flags
 
+    if not out_result.passed and "no_citation_markers" in out_result.flags and not already_streamed:
+        # Per decisions.md D-071: real-hardware runs showed the model
+        # sometimes answers a confidently-known fact fluently but with
+        # ZERO citation brackets, despite the synthesis prompt's
+        # explicit "every factual claim MUST be followed by a citation
+        # tag" instruction and real sources being available -- observed
+        # directly on "What year was the transistor invented?", 8
+        # sources retrieved, model just didn't bother citing something
+        # it "already knew". One bounded retry, same query/chunks, same
+        # reasoning as D-066's empty-retrieval retry: a small local
+        # model's instruction-following isn't 100% reliable turn to
+        # turn, and a second attempt is cheap insurance against
+        # wrongly refusing an actually-answerable query over a
+        # formatting slip, not a correctness problem.
+        #
+        # Deliberately scoped to NOT retry when already_streamed: the
+        # first attempt's tokens are already on the user's screen in
+        # that case, and a silent second generation can't un-print
+        # them. That gap is accepted and documented here, not hidden --
+        # streaming/verbose mode can still hit this bug uncorrected.
+        if debug_report:
+            debug_report(
+                "fast path: no citation markers in first answer, retrying once"
+            )
+        answer, _citations = generate(
+            query, chunks, model, max_tokens=max_tokens,
+            conversation_context=conversation_context,
+        )
+        out_result = output_rail(answer, require_citations=bool(chunks))
+        flags = state.get("guardrail_flags", []) + out_result.flags
+
     if not out_result.passed:
         return (
             "[The answer failed output safety/quality checks -- this "

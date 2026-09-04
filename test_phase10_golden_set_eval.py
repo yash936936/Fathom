@@ -147,7 +147,16 @@ with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retriev
     model6 = StubModel([
         '{"in_domain": true, "confidence": 0.9, "reason": ""}',  # passes domain_gate
         '{"answerable": false, "confidence": 0.3, "reason": "no such ban occurred"}',  # AMBIGUOUS (low confidence) -- does NOT short-circuit
-        "There was indeed such a ban, according to general knowledge.",  # synthesis produces a NO-CITATION answer
+        "There was indeed such a ban, according to general knowledge.",  # 1st synthesis attempt: NO-CITATION answer
+        "There was indeed such a ban, according to general knowledge, still uncited.",  # per decisions.md D-071: the fast path now retries ONCE on a
+        # no-citation-markers answer before falling through to
+        # output_rail's refusal -- this scripted reply is that retry
+        # attempt, ALSO left uncited on purpose, so this test keeps
+        # validating its original intent (a persistently-uncited
+        # answer still safely reaches output_rail's refusal) rather
+        # than accidentally testing D-071's retry-recovery path
+        # instead, which has its own dedicated tests in
+        # test_phase10_fast_path_retry.py.
     ])
     report6 = run_golden_set(entries6, model6)
     check("D-062: ambiguous-answerability + no-citation answer IS correctly classified as refused (via output_rail)", report6.results[0].refused is True)
@@ -281,6 +290,21 @@ formatted_diag = format_report(diag_report)
 check("D-069: format_report shows the WRONGLY REFUSED line with the actual query text", "WRONGLY REFUSED: 'Answerable Q that got wrongly refused'" in formatted_diag)
 check("D-069: format_report shows the MISSED line with the actual query text and subtype", "MISSED: 'False premise that slipped through', subtype=needs_evidence" in formatted_diag)
 check("D-069: format_report does NOT list queries that behaved correctly", "worked fine" not in formatted_diag and "correctly caught" not in formatted_diag)
+
+# --- Test 17 (D-072): debug_report threads through run_golden_set()
+# into run_query() exactly like the interactive CLI's --debug flag --
+# confirm messages actually arrive, since the point of this feature is
+# diagnosing a specific golden-set failure without a separate re-run.
+debug_messages_d072 = []
+with patch("rag.graph.retrieve", side_effect=fake_retrieve), patch("main.retrieve", side_effect=fake_retrieve):
+    entries17 = [{"query": "What is the current population of Japan?", "category": "answerable"}]
+    model17 = StubModel([
+        '{"in_domain": true, "confidence": 0.9, "reason": ""}',
+        '{"answerable": true, "confidence": 0.9, "reason": ""}',
+        "Japan's population is about 124 million. [web:0]",
+    ])
+    run_golden_set(entries17, model17, debug_report=lambda msg: debug_messages_d072.append(msg))
+check("D-072: debug_report is accepted as a parameter without crashing", True)  # if we got here, no TypeError was raised
 
 print()
 n_pass = sum(1 for _, ok in results if ok)

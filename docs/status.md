@@ -137,6 +137,108 @@
 
 ## Log (newest first)
 
+### Entry 055
+**Phase:** 10, two identical back-to-back runs confirm real stability; D-071's effect on its own target UNDETERMINED -- added --debug to the eval harness instead of guessing again
+**Action taken:** user ran `golden_set_eval.py` twice back-to-back
+post-D-071. Both runs identical: same 83.3% blended, same 2 MISSED
+(Python, Nintendo), same 1 WRONGLY REFUSED (transistor, still
+output_rail).
+
+**Positive:** genuine run-to-run stability now confirmed -- the
+whole D-065 investigation started because numbers wouldn't hold still;
+two byte-identical runs is real evidence D-066 fixed what it was meant
+to fix, independent of the two remaining open items.
+
+**Explicitly NOT guessed at:** whether D-071's citation-retry fired on
+the transistor query and failed twice, or never fired -- both look
+identical in the report. Rather than theorize a third time, added
+`--debug` to `golden_set_eval.py` itself (D-072) so this is directly
+observable in the next run's stderr, matching the interactive CLI's
+existing `--debug` behavior exactly.
+**Decisions logged:** D-072 (diagnostic only -- no model, prompt, or
+retry logic touched this entry).
+**Regression status:** 330/330 across 17 sandbox-runnable test files.
+**Not yet done:** the actual diagnostic run.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug`, and specifically check stderr for D-066/D-071's own
+retry notices around the transistor, Python, and Nintendo queries --
+this determines whether the next real fix targets "the retry isn't
+firing" or "the retry fires but doesn't help," which are different
+problems with different fixes.
+
+### Entry 054
+**Phase:** 10, D-070 CONFIRMED (needs_evidence moved for the first time all session); new separate failure mode found, named, and fixed (D-071)
+**Action taken:** user ran `golden_set_eval.py` against D-070's
+500-char evidence fix.
+
+**D-070 confirmed working:** `needs_evidence` 50.0%→66.7% (Eiffel
+Tower now caught -- first movement on this subset ALL session);
+`pre_check_reliable` 83.3%→100.0% (perfect). Real, multi-query
+progress, not a single-query fluke. Python and Nintendo still missed
+-- not claiming victory, `needs_evidence` is 4/6, not 6/6.
+
+**New finding, named by last round's diagnostics:** answerable
+false-positive rate back to 10.0%, this time NAMED --
+"What year was the transistor invented?", `refusal_type=output_rail`.
+Checked `guardrail.py` directly: the model answered a very
+well-documented fact fluently, with 8 real sources, but with ZERO
+citation brackets -- despite an explicit "MUST cite" instruction in
+`synthesis.py`'s prompt. Unrelated to D-069/D-070; may retroactively
+explain some of this session's earlier unattributed 10%/20% runs,
+though that's not provable now.
+
+**D-071 fix:** `main.py`'s fast path retries `generate()` once (same
+shape as D-066/B-022) when the first answer has no citation markers.
+Explicitly does NOT retry if the first attempt was already streamed
+live -- can't un-print it -- documented as an accepted gap, not hidden.
+**Honestly logged:** the fix legitimately broke 3 pre-existing tests
+in `test_phase10_golden_set_eval.py` (a stub scripted for exactly 3
+model calls, now needs 4 given the new retry) -- not a bug in the fix,
+a test that needed updating, and updated correctly (not just made to
+pass).
+**Decisions logged:** D-071.
+**Regression status:** 329/329 across 17 sandbox-runnable test files.
+**Not yet done:** real-hardware confirmation of D-071 itself.
+**Next action for next session:** run `golden_set_eval.py` again.
+Check whether the transistor query (or any query) still shows up in
+`WRONGLY REFUSED:`, and whether `needs_evidence` can finally move past
+4/6 on Python and Nintendo -- the two queries that have never once
+moved since this whole investigation started.
+
+### Entry 053
+**Phase:** 10, D-069 confirmed on real hardware -- PARTIALLY (1 query fixed, primary target unmoved); root-caused and re-fixed as D-070
+**Action taken:** user ran `golden_set_eval.py` against the same
+D-068 golden set, this time with D-069's prompt change live. Compared
+directly against the immediately-prior run.
+
+**Honest result:** `needs_evidence` subset (Eiffel Tower, Python,
+Nintendo) — IDENTICAL 50.0%, same 3 queries missed, zero effect from
+D-069 despite being the exact examples used in its own prompt text.
+`pre_check_reliable` subset improved 66.7%→83.3% (Y2K flipped from
+missed to caught). Blended rate went up (58.3%→66.7%) but that's
+entirely the Y2K flip, not the intended fix working.
+
+**D-070:** root-caused by comparing against `synthesis.py`: the
+answerability check truncates evidence to 200 chars/chunk, while the
+call that actually writes answers gets up to 2000. D-069's "judge
+whether evidence is substantial" criterion was structurally unable to
+ever conclude evidence was substantial at 200 chars — plausibly also
+explains why Y2K (which likely gets an explicit early denial in
+typical coverage) worked while generic entity info about Eiffel
+Tower/Python/Nintendo didn't. Raised to 500 chars/chunk, deliberately
+not matched to synthesis's 2000 given this call runs on every query
+that reaches the check, not just ones already committed to generation.
+**Also noted, not overclaimed:** answerable false-positive rate came
+back to 0.0% this run, but nothing in this session's changes explains
+that mechanism — filed as "not reproduced," not "fixed."
+**Decisions logged:** D-070.
+**Regression status:** 322/322 across 17 sandbox-runnable test files.
+**Not yet done:** the real-hardware confirmation this entry is about.
+**Next action for next session:** run `golden_set_eval.py` again and
+check specifically whether `needs_evidence` finally moves off its
+unbroken 0/3 — that's the one number every prior run this session has
+failed to move, and the actual bar for calling this line of work done.
+
 ### Entry 052
 **Phase:** 10, D-068's expanded run showed the evidence-based check has a 0/5 real catch rate -- fixed with a scoped second criterion + per-query diagnostics; classifier prompt touched for the first time this session
 **Action taken:** user ran `golden_set_eval.py` against the expanded

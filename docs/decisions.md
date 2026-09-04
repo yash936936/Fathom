@@ -2848,4 +2848,191 @@ answerable-false-positive BEFORE this change, which the new diagnostic
 reporting should surface on the very next run regardless of outcome.
 
 ---
+
+### D-070 — D-069 confirmed on real hardware, PARTIALLY: real improvement on one query, ZERO effect on the primary target; root-caused to a 200-char evidence truncation and fixed
+
+**Context:** first real run against D-069's prompt change. Compared
+exactly against the run immediately before it (both against the same
+D-068 golden set):
+
+| Subset | Before D-069 | After D-069 | Changed? |
+|---|---|---|---|
+| `needs_evidence` (Eiffel/Python/Nintendo/Amazon/Google/Netflix) | 50.0% | 50.0% | **No — identical, same 3 missed** |
+| `pre_check_reliable` (incl. Y2K, 10%-brain) | 66.7% | 83.3% | Yes — Y2K flipped from missed to caught |
+| Answerable false-positive rate | 10.0% | 0.0% | Improved (not attributed to D-069 -- see below) |
+
+**Honest read:** D-069 helped exactly one query (Y2K) and had
+literally zero effect on the three queries it was specifically
+designed around (Eiffel Tower, Python, Nintendo — the same three
+examples used IN the prompt text itself). Reporting the full, unedited
+result rather than the flattering half of it (blended rate went up
+58.3%→66.7%, which on its own would have looked like a clean win).
+
+**Root cause, found by comparing to a different part of the codebase:**
+`answerability.py`'s `_format_evidence()` truncates each chunk to 200
+characters before it ever reaches the model. `synthesis.py` (the call
+that actually WRITES the answer) gets up to 2000 chars/chunk via its
+own `_MAX_CHUNK_CHARS`. D-069's criterion 2 explicitly asks the model
+to judge whether evidence covers a subject "in real depth" — at 200
+chars/chunk, roughly one short sentence, the check was structurally
+incapable of ever concluding evidence was substantial, regardless of
+how the prompt was worded. This plausibly also explains WHY Y2K
+worked and the other three didn't: Y2K retrospective content commonly
+leads with an explicit "contrary to fears, it did not cause X" framing
+that fits inside 200 chars; generic entity information about a real
+landmark/language/company does not front-load a denial of something
+that never happened, so 200 chars just reads as normal unrelated
+content, never as "silence despite depth."
+
+**Fix:** raised `_format_evidence()`'s per-chunk truncation 200 → 500
+chars. Deliberately NOT matched to synthesis's 2000 — this call runs
+on every single query reaching the evidence-based check, not just ones
+already committed to full generation, so the token/latency cost is
+paid more often; 500 is a considered middle ground, not a "just match
+the other one" copy.
+
+**Also noted, not attributed:** the answerable false-positive rate
+recovering to 0.0% this run is good but NOT claimed as fixed by
+anything in this session — D-069's change doesn't touch the mechanism
+that would cause that failure mode, and the diagnostic reporting added
+in the same entry found nothing to report (no `WRONGLY REFUSED:` lines
+in this run's output), consistent with it having been a one-off rather
+than a fixed bug. Filed as "not reproduced this run," not "resolved."
+
+**Files touched:** `src/verification/answerability.py`,
+`test_phase6_answerability.py` (+2 checks: formatted evidence exceeds
+the old 200-char limit, is bounded at exactly the new 500).
+**Verification:** 23/23 answerability tests, 322/322 across the full
+17 sandbox-runnable test files.
+**Not yet done:** the actual real-hardware confirmation this entry is
+about. Next run should show whether `needs_evidence` finally moves off
+its unbroken 0/3, and whether the answerable false-positive rate stays
+near 0% with more evidence per chunk now reaching a check that fires
+on more queries than before.
+
+---
+
+### D-071 — D-070 CONFIRMED on real hardware (needs_evidence moved for the first time all session); separately, a NEW named failure mode found and fixed: synthesis sometimes omits citation brackets on confidently-known facts
+
+**Context:** first real run against D-070's 500-char evidence fix.
+
+**D-070 confirmed working, honestly:**
+
+| Subset | Before D-070 | After D-070 |
+|---|---|---|
+| `needs_evidence` | 50.0% (0/3, unbroken all session) | **66.7% (Eiffel Tower now caught, first movement ever)** |
+| `pre_check_reliable` | 83.3% | **100.0% (perfect, 10%-brain now caught too)** |
+| Blended | 66.7% | 83.3% |
+
+Real, multi-query movement this time, not the single-query flip D-069
+alone produced. Python and Nintendo are still missed — not declaring
+victory, `needs_evidence` is 4/6 not 6/6 — but this is the first time
+any run this session has moved that specific number at all.
+
+**New, separate finding: `answerable_false_positive_refusal_rate`
+back to 10.0%, this time NAMED by the D-069 diagnostics** — "What year
+was the transistor invented, and who invented it?", `refusal_type=
+output_rail`. Checked `guardrail.py` directly: `output_rail` flags
+`no_citation_markers` when `"[" not in answer`. The model answered
+this extremely well-documented fact (1947, Bell Labs) fluently and
+correctly, with 8 real sources retrieved, but with ZERO citation
+brackets anywhere in the text — despite `synthesis.py`'s system prompt
+explicitly stating "every factual claim MUST be followed by a citation
+tag." Plausible mechanism: a small local model is more likely to skip
+the citation convention specifically on facts it's confident about
+from its own training, not needing to "check" a source it feels it
+already knows. This is UNRELATED to D-069/D-070 (different mechanism
+entirely) and may retroactively explain some of this session's earlier
+unattributed 10%/20% answerable-false-positive runs, though that's not
+provable after the fact.
+
+**Fix:** `src/main.py`'s fast path now retries `generate()` once, same
+query/chunks, if the first attempt's answer has no citation markers --
+same bounded-retry shape as D-066/B-022, applied to a different
+trigger. Explicitly scoped to NOT retry when the first attempt was
+already streamed live to the user (`already_streamed`) -- a retry
+can't un-print tokens already on someone's screen; that gap is
+accepted and documented, not silently papered over. Two consecutive
+uncited attempts still correctly falls through to the honest
+`output_rail` refusal, not an infinite retry.
+
+**Also worth logging honestly:** implementing this fix broke 3
+pre-existing tests in `test_phase10_golden_set_eval.py` (the D-062
+"ambiguous-answerability + no-citation answer" integration test) --
+its `StubModel` was scripted for exactly 3 model calls, and the new
+retry legitimately made a 4th, which its stub had no reply queued for
+and correctly raised on. Not a bug in the new retry; the test's stub
+needed a 4th scripted reply. Fixed by adding one (also uncited on
+purpose, so the test keeps validating its original intent -- a
+persistently-uncited answer still safely reaches `output_rail` -- not
+accidentally switching to testing D-071's recovery path instead, which
+has its own dedicated tests).
+
+**Files touched:** `src/main.py`, `test_phase10_fast_path_retry.py`
+(+7 checks: retry recovers from an uncited first attempt, bounded to
+one retry when both fail, does NOT fire when already streamed, correct
+debug_report behavior; +1 pre-existing test's stub updated to not
+spuriously collide with the new retry), `test_phase10_golden_set_eval.py`
+(1 pre-existing test's stub updated, 0 new tests -- this file's D-069
+diagnostics already cover the reporting side).
+**Verification:** 19/19 in the retry test file, 46/46 in the golden-
+set-eval test file, 329/329 across the full 17 sandbox-runnable test
+files.
+**Not yet done:** real-hardware confirmation of D-071 itself. Next run
+should show whether the transistor query (or any other confidently-
+known-fact query) stops appearing in the `WRONGLY REFUSED:` diagnostic
+line, and whether `needs_evidence` can move past its current 4/6 on
+Python and Nintendo specifically -- those two remain the last fully
+unmoved queries from the original D-067 finding.
+
+---
+
+### D-072 — Two identical back-to-back real runs post-D-071: real stability confirmed, but D-071's fix effect on the transistor query is UNDETERMINED from the report alone; added `--debug` to the eval harness rather than guess again
+
+**Context:** user ran `golden_set_eval.py` twice, back-to-back, post
+D-071. Both runs came back byte-for-byte identical: 83.3% blended,
+100%/66.7% subsets, same 2 `MISSED:` false_premise queries (Python,
+Nintendo), same 1 `WRONGLY REFUSED:` query (transistor, still
+`output_rail`).
+
+**Positive, worth naming explicitly:** this is real stability. The
+whole investigation arc started at D-065 because numbers wouldn't hold
+still run to run; two runs now landing on literally identical results
+is itself evidence that D-066 (retrieval retry) fixed what it was
+supposed to fix, independent of anything about the two remaining
+issues below.
+
+**What's genuinely unknown:** whether D-071's citation-retry actually
+fired on the transistor query and failed twice, or never fired at
+all. Both produce the exact same visible outcome (`refusal_type=
+output_rail`) in the report -- the aggregate numbers cannot distinguish
+"retry attempted, still uncited" from "retry never triggered." Rather
+than guess a third time (this session already got D-069 wrong once and
+D-071 has now gone two runs without visible effect on its own named
+target), the right move is to make this observable, not theorize about
+it.
+
+**Fix (diagnostic only, no model/prompt/retry logic changed):** added
+`--debug` support to `golden_set_eval.py` (`main()` and
+`main_with_judge()`), threading a `debug_report` callback through
+`run_golden_set()` into `run_query()` -- the exact same channel the
+interactive CLI's `--debug` flag already uses. This surfaces D-066's
+and D-071's own retry notices directly in the eval run's stderr, per
+query, without needing a separate single-query CLI re-run to find out
+what happened.
+
+**Files touched:** `tests/eval/golden_set_eval.py`
+(`run_golden_set()` gained `debug_report`, threaded into both `main()`
+and `main_with_judge()`), `test_phase10_golden_set_eval.py` (+1 check
+confirming the parameter is accepted and threads through without
+error).
+**Verification:** 47/47 in the golden-set-eval test file, 330/330
+across the full 17 sandbox-runnable test files.
+**Not yet done:** the actual diagnostic run. Next step is `python
+tests/eval/golden_set_eval.py --debug`, specifically checking stderr
+around the transistor query and the Python/Nintendo queries for
+whether D-071's/D-066's retry notices appear at all, and if they do,
+what the retried content actually looked like.
+
+---
 **Return to `/context.md` for next steps.**

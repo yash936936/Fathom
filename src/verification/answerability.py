@@ -92,9 +92,26 @@ class AnswerabilityCheckError(RuntimeError):
 
 
 def _format_evidence(chunks: list[RetrievedChunk]) -> str:
+    """Per decisions.md D-070: raised from 200 to 500 chars/chunk.
+    Real-hardware runs (status.md Entry 052/053) showed D-069's second
+    criterion -- which explicitly requires the model to judge whether
+    evidence covers a subject "in real depth" -- never once fired on
+    its primary targets (Eiffel Tower/Python/Nintendo), while
+    synthesis.py's OWN answer-writing call gets up to 2000 chars/chunk
+    (_MAX_CHUNK_CHARS). At 200 chars, this check literally could not
+    see enough of each source to ever conclude evidence was
+    "substantial" -- it was being asked to judge depth from material
+    that was never given the chance to look deep. 500 is a deliberate
+    middle ground, not a match to synthesis's 2000: this call runs on
+    EVERY query (not just ones that reach full retrieval), so more
+    than doubling per-chunk length is a real, direct latency cost on a
+    CPU-bound local model (trd.md §1) -- worth paying if it makes the
+    check actually work, not worth 10x'ing blindly to match a
+    different call with a different job.
+    """
     if not chunks:
         return "(no evidence retrieved yet)"
-    return "\n".join(f"- {c['source']}: {c['content'][:200]}" for c in chunks)
+    return "\n".join(f"- {c['source']}: {c['content'][:500]}" for c in chunks)
 
 
 def classify_answerability(
