@@ -368,13 +368,33 @@ def run_query(
         # that case, and a silent second generation can't un-print
         # them. That gap is accepted and documented here, not hidden --
         # streaming/verbose mode can still hit this bug uncorrected.
+        #
+        # Per decisions.md D-073: real hardware (status.md Entry 056,
+        # via --debug) confirmed this retry DOES fire on exactly the
+        # queries D-071 named, but at the SAME prompt/temperature=0.3
+        # it produced the same uncited answer again both times
+        # ("transistor invented" and "latest inflation rate" both
+        # still wrongly refused). An identical-conditions retry is
+        # weak insurance against a systematic tendency (skip citing
+        # facts the model treats as "already known"), not a transient
+        # sampling fluke -- so the retry is now a corrective one:
+        # generate() is told explicitly what was missing
+        # (force_citations=True), and temperature is raised modestly
+        # (0.3 -> 0.5) to actually escape the low-temperature attractor
+        # that reproduced the same output. 0.5 is a deliberate middle
+        # ground -- high enough to change the sampling path, not so
+        # high it risks the model inventing content on a fact-citing
+        # retry.
         if debug_report:
             debug_report(
-                "fast path: no citation markers in first answer, retrying once"
+                "fast path: no citation markers in first answer, "
+                "retrying once with a corrective prompt + temperature=0.5"
             )
         answer, _citations = generate(
             query, chunks, model, max_tokens=max_tokens,
             conversation_context=conversation_context,
+            temperature=0.5,
+            force_citations=True,
         )
         out_result = output_rail(answer, require_citations=bool(chunks))
         flags = state.get("guardrail_flags", []) + out_result.flags

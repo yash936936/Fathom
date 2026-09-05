@@ -643,4 +643,85 @@ back-to-back pair of real `golden_set_eval.py` runs to check whether
 metrics stop swinging as sharply.
 
 ---
+
+### B-023 (see decisions.md D-073 for full context) — D-071's citation retry fired correctly but resampled the SAME prompt at the SAME temperature, so a systematic (not random) no-citation tendency reproduced itself
+
+**Symptom (real hardware, via `--debug`):** on both "What year was the
+transistor invented?" and "What is the latest inflation rate in the
+United States?", the debug trace showed `fast path: no citation
+markers in first answer, retrying once` firing exactly as designed --
+but both queries still ended up `WRONGLY REFUSED`/`output_rail` in the
+final report. The retry mechanism itself (D-071) worked; it just
+didn't change the outcome.
+
+**Root cause:** `main.py`'s retry called `rag.synthesis.generate()`
+with the identical prompt and the identical `temperature=0.3` as the
+first attempt. That's the right shape for a genuinely random sampling
+fluke (see D-066/B-022's empty-retrieval retry, which IS random and
+IS fixed by a plain retry) -- but a model skipping citations because
+it judges a fact as "already known" is a systematic tendency in its
+own reasoning, not noise, and a same-conditions resample at low
+temperature has little reason to land somewhere different.
+
+**Fix:** the retry is now corrective. `rag/synthesis.generate()`
+gained `force_citations: bool = False`, which appends an explicit
+instruction to the prompt naming exactly what was missing and stating
+that confidence in a fact doesn't exempt it from citation. `main.py`'s
+retry call passes `force_citations=True` and raises `temperature` to
+0.5 for that one call only (first attempts, and every other caller of
+`generate()`, are unaffected).
+
+**Files touched:** `src/rag/synthesis.py`, `src/main.py`.
+**Verification:** 376/376 across all 20 sandbox-runnable test files
+this session (see decisions.md D-073 for the sandbox-dependency note
+explaining the file-count difference from prior sessions' "330/330
+across 17 files" -- not a different baseline, just `rank_bm25`/
+`langgraph` now being installed here too).
+**Not yet confirmed on real hardware** -- same standing gap as every
+fix in this project before its first real-hardware run. Next
+`golden_set_eval.py --debug` run should show whether the transistor
+and inflation-rate queries stop appearing in `WRONGLY REFUSED:`.
+
+---
+
+### B-024 (see decisions.md D-074 for full context) — `_smooth_truncation()` deleted citation tags placed after the answer's final period, silently producing a citation-less answer from an actually-cited one
+
+**Symptom:** two golden-set queries ("What year was the transistor
+invented?", "What is the latest inflation rate in the United
+States?") persistently failed with `output_rail`'s `no_citation_
+markers` flag across multiple sessions and multiple fix attempts
+(D-071, D-073), even when `--debug` confirmed the citation retry was
+firing.
+
+**Root cause, reproduced directly (no live model needed):**
+`_smooth_truncation()` judges an answer "complete" by checking
+whether its last character is `.`, `!`, or `?`. A citation tag placed
+after the sentence's closing punctuation -- e.g. `"...Bell Labs.
+[web:0]"`, a very natural placement for a short single-fact answer --
+ends in `]`, so the function treated a complete, correctly-cited
+answer as a mid-sentence truncation and trimmed the citation off.
+`generate()` calls `_smooth_truncation()` BEFORE `_extract_citations()`
+and before the text reaches `output_rail`, so the real citation never
+had a chance to be seen by either. This is deterministic, not a
+sampling issue -- it explains why D-071's plain retry and D-073's
+corrective-prompt-plus-temperature retry both could fire and still
+fail: neither addresses a bug in Fathom's own post-processing.
+
+**Fix:** `_smooth_truncation()` now strips trailing citation tag(s)
+before checking for a clean ending, then restores the full text
+(citations included) once the underlying sentence is confirmed
+complete. Genuine mid-token truncation is handled exactly as before.
+
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`
+(+4 checks).
+**Verification:** 34/34 in `test_phase4_manual.py`, 380/380 across
+all 20 sandbox-runnable test files. Verified directly against the
+real functions with concrete before/after input-output pairs, not
+inferred from behavior.
+**Not yet confirmed on real hardware** -- same standing gap as every
+fix in this project. Next `golden_set_eval.py --debug` run is the
+actual test: do the transistor and inflation-rate queries stop
+appearing in `WRONGLY REFUSED:`.
+
+---
 **Return to `/context.md` for next steps.**

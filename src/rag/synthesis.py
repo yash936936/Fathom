@@ -61,6 +61,12 @@ _MAX_CHUNK_CHARS = 2000
 # is a much better failure mode than showing a dangling word fragment.
 _SENTENCE_END_PATTERN = re.compile(r"[.!?]\s")
 
+# Matches one or more citation tags sitting at the very end of the
+# answer, e.g. "...Bell Labs. [web:0]" or "...Bell Labs. [web:0][web:1]"
+# -- see decisions.md D-074. Reuses the same bracket-content character
+# class as _CITATION_TAG_PATTERN above.
+_TRAILING_CITATIONS_PATTERN = re.compile(r"(?:\[[a-zA-Z0-9_:.,\s-]+\]\s*)+$")
+
 
 def _smooth_truncation(text: str) -> str:
     """If `text` ends mid-sentence (a hard max_tokens cap cut it off
@@ -69,16 +75,39 @@ def _smooth_truncation(text: str) -> str:
     complete sentence instead of showing a dangling fragment. If there's
     no complete sentence to trim back to at all, mark the cutoff
     explicitly rather than silently presenting a fragment as complete.
+
+    Per decisions.md D-074: a model very commonly places a citation tag
+    AFTER a sentence's closing punctuation ("Sentence. [source]"),
+    especially in short, single-fact answers. Before this fix, that
+    pattern's last character is "]", not one of ".!?", so this function
+    mistook a complete, correctly-cited answer for a mid-sentence
+    truncation and silently trimmed the citation away -- which then
+    made the answer look uncited to both `_extract_citations()` and
+    `core/guardrail.output_rail()`, triggering `no_citation_markers` on
+    an answer that actually WAS cited. Confirmed on real hardware as
+    the root cause behind two persistent golden-set false positives
+    ("transistor invented", "latest inflation rate") that D-071's
+    plain retry and D-073's corrective-prompt-plus-temperature retry
+    both failed to fix, because neither addresses this: any citation
+    placed at the very end after the final period gets stripped again
+    regardless of what the model generates.
     """
     stripped = text.rstrip()
     if not stripped:
         return stripped
-    if stripped[-1] in ".!?":
-        return stripped  # already ends cleanly, nothing to do
 
-    matches = list(_SENTENCE_END_PATTERN.finditer(stripped))
+    # Judge completeness on the text with any trailing citation tag(s)
+    # removed, so "claim. [source]" is correctly recognized as complete
+    # rather than compared against the bracket's closing "]".
+    trailing_match = _TRAILING_CITATIONS_PATTERN.search(stripped)
+    core = stripped[: trailing_match.start()].rstrip() if trailing_match else stripped
+
+    if core and core[-1] in ".!?":
+        return stripped  # already ends cleanly -- citations kept as-is
+
+    matches = list(_SENTENCE_END_PATTERN.finditer(core))
     if matches:
-        trimmed = stripped[: matches[-1].end()].rstrip()
+        trimmed = core[: matches[-1].end()].rstrip()
         if trimmed:
             return trimmed
 
@@ -167,6 +196,7 @@ def generate(
     on_token=None,
     conversation_context: str = "",
     temperature: float = 0.3,
+    force_citations: bool = False,
 ) -> tuple[str, list[Citation]]:
     """Core synthesis call, shared by the fast path (Phase 4) and the
     agentic path's SYNTHESIS node (Phase 5). Returns (answer_text,
@@ -191,6 +221,22 @@ def generate(
     per decisions.md D-045 so verification/self_consistency.py (Phase 6)
     can request higher-temperature resampling of the SAME query/chunks
     without duplicating this whole function.
+
+    `force_citations`, default False. Per decisions.md D-073: D-071's
+    identical-prompt, identical-temperature retry was confirmed on real
+    hardware (status.md Entry 056) to fire correctly but still fail on
+    the exact queries it was meant to fix ("What year was the
+    transistor invented?", "What is the latest inflation rate in the
+    United States?") -- at temperature=0.3, resampling the same prompt
+    rarely produces a materially different answer, so a model that
+    "already knows" a fact and skips citing it tends to skip citing it
+    again on a plain retry. When True, appends an explicit corrective
+    instruction naming the specific failure (no citation tags, even on
+    confidently-known facts) to the user prompt. The caller is expected
+    to also raise `temperature` slightly for this call -- see main.py's
+    retry site. Never used on a first attempt at any query; adding a
+    "you failed" notice before the model has even answered once would
+    just be noise on top of an already-explicit base prompt.
     """
     if not chunks:
         # No retrieved evidence at all -- do not let the model answer
@@ -217,6 +263,16 @@ def generate(
         "ground the answer itself only in the sources, never in prior "
         "answers alone."
     )
+    if force_citations:
+        user_prompt += (
+            "\n\nIMPORTANT: a previous attempt at this exact question "
+            "produced NO [source_id] citation tags at all, even though "
+            "sources were provided above. This applies even to facts you "
+            "are confident you already know -- confidence is not an "
+            "exception to the citation rule. Every sentence that states a "
+            "fact must end with a [source_id] tag, immediately before its "
+            "closing punctuation, with no exceptions."
+        )
 
     answer = model.chat(
         messages=[

@@ -134,6 +134,48 @@ check(
     _smooth_truncation(real_complete) == real_complete,
 )
 
+# --- D-074 (found via real-hardware --debug diagnosis of two
+# persistent golden-set false positives, "transistor invented" and
+# "latest inflation rate" -- see decisions.md D-074, status.md
+# Entry 057): a citation tag placed AFTER the sentence's closing
+# punctuation ("Sentence. [source]") used to be mistaken for a
+# mid-sentence truncation (last char "]" isn't in ".!?") and silently
+# trimmed away, deleting a real citation from an otherwise complete,
+# correctly-cited answer -- the actual root cause behind D-071 and
+# D-073's retries both firing and still failing on those two queries. ---
+citation_after_period = (
+    "The transistor was invented in 1947 by Bardeen, Brattain, and "
+    "Shockley at Bell Labs. [web:0]"
+)
+check(
+    "D-074: citation placed AFTER the final period is preserved, not stripped",
+    _smooth_truncation(citation_after_period) == citation_after_period,
+)
+
+multi_citation_after_period = "Inflation is currently 2.9%. [news:0][arxiv:1]"
+check(
+    "D-074: multiple trailing citation tags after the final period are all preserved",
+    _smooth_truncation(multi_citation_after_period) == multi_citation_after_period,
+)
+
+citation_before_period = (
+    "The transistor was invented in 1947 at Bell Labs [web:0]."
+)
+check(
+    "D-074: citation placed BEFORE the final period still passes through unchanged",
+    _smooth_truncation(citation_before_period) == citation_before_period,
+)
+
+# Genuinely truncated mid-token, with a citation tag right at the cut
+# point and no closing punctuation anywhere -- must still be marked as
+# cut short, not mistaken for a complete "citation after period" case.
+genuinely_truncated_with_citation = "The transistor was invented in 1947 at Bell Labs [web:0]"
+smoothed_truncated_citation = _smooth_truncation(genuinely_truncated_with_citation)
+check(
+    "D-074: a citation with no sentence-ending punctuation anywhere is still marked cut short",
+    "[response cut short]" in smoothed_truncated_citation,
+)
+
 no_sentence_at_all = "Fusion energy is the proc"
 check(
     "truncation with zero complete sentences is marked, not silently shown",

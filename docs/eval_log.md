@@ -162,3 +162,13 @@ judge comparison" so the two are easy to tell apart at a glance.
   - needs-evidence subset (n=6): 83.3%
 **Answerable false-positive refusal rate:** 20.0%
 **Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-09-05 09:11 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 38 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 66.7%
+  - pre-check-reliable subset (n=6): 83.3%
+  - needs-evidence subset (n=6): 50.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)

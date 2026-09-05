@@ -3035,4 +3035,239 @@ whether D-071's/D-066's retry notices appear at all, and if they do,
 what the retried content actually looked like.
 
 ---
+
+### D-073 — `--debug` run answers D-072's question directly: D-071's retry DOES fire, but an identical-prompt/identical-temperature resample doesn't fix a systematic (not random) failure. Retry is now corrective, not a blind repeat.
+
+**Context:** user ran `python tests/eval/golden_set_eval.py --debug`,
+the exact command D-072 asked for. Read the stderr trace line by line
+against the final report, not just the headline numbers.
+
+**What the trace actually shows, per query:**
+- Query 1 (`transistor invented`): `fast path: no citation markers in
+  first answer, retrying once` fires. Final result: still
+  `WRONGLY REFUSED`, `refusal_type=output_rail`. D-072's open question
+  is answered -- the retry fires and fails, it does not silently never
+  trigger.
+- Query 7 (`latest inflation rate`): same retry notice fires, same
+  outcome -- also now `WRONGLY REFUSED`/`output_rail`. This is a NEW
+  name on the list (Entry 054/055 only ever named the transistor
+  query), confirming D-071's uncited-confident-fact failure mode is a
+  class of queries, not one fluke query -- and explaining the
+  answerable false-positive rate's jump to 20.0% this run (up from
+  10.0%, both now attributable rather than one attributed + one
+  unexplained).
+- Query 25 (`Python discontinued`, `needs_evidence`): the same retry
+  notice fires, and this time the query is CAUGHT (previously
+  `MISSED` every run since D-067). `needs_evidence` moved 66.7% ->
+  83.3% (4/6 -> 5/6) -- the first real movement on this subset all
+  session (matching D-070's own framing that it had never moved).
+- Query 26 (`Nintendo`, `needs_evidence`): NO retry notice at all --
+  the first `generate()` call already had citation markers. This
+  query's persistent miss is therefore NOT a citation-formatting
+  problem and was never going to be touched by D-071 -- it's still
+  D-067's original, separately-tracked evidence-based answerability
+  gap (generic retrieved evidence rarely contains an explicit denial
+  of something that didn't happen). Confirms D-067/D-070's diagnosis
+  is still the right one for this specific query; nothing new to fix
+  here from this run.
+
+**Root cause, now directly evidenced rather than theorized:**
+`rag/synthesis.generate()`'s retry in `main.py` called the exact same
+prompt at the exact same `temperature=0.3` as the first attempt. For a
+genuinely random sampling fluke, that's reasonable insurance (D-066's
+empty-retrieval retry is exactly this shape, and works). But this
+failure isn't random noise -- it's the model treating a fact as
+confidently "already known" and therefore exempt from the citation
+rule in its own reasoning, a systematic tendency that a same-conditions
+resample at low temperature is unlikely to disrupt, and evidently
+doesn't (2/2 real observed cases, both failed identically twice).
+
+**Fix:** `rag/synthesis.generate()` gains `force_citations: bool =
+False`. When True, appends an explicit corrective instruction to the
+user prompt naming the exact failure ("a previous attempt had NO
+citation tags, even for facts you're confident about -- confidence is
+not an exception"). `main.py`'s citation-retry call now passes
+`force_citations=True` AND raises `temperature` from 0.3 to 0.5 for
+that one retry call only -- high enough to meaningfully change the
+sampling path away from the exact same output, deliberately not
+raised further given this is a fact-citing retry, not a creative one,
+and a higher temperature trades directly against factual reliability.
+The first attempt at every query is completely unaffected -- this
+only ever fires on the second call, and only when the first call's
+answer had no citation markers at all.
+
+**Explicitly not done:** no change to `answerability.py` or D-067's
+evidence-contradiction requirement -- Nintendo's continued miss this
+run is unrelated to this fix and stays a separate, already-tracked
+open item, not conflated with this one just because both showed up in
+the same run.
+
+**Files touched:** `src/rag/synthesis.py` (`force_citations` param +
+corrective prompt addendum), `src/main.py` (retry call site: passes
+`force_citations=True`, `temperature=0.5`, updated debug notice text
+and inline rationale comment).
+**Verification:** all 20 sandbox-runnable test files pass (376/376 in
+this session's sandbox, which now also has `rank_bm25` and `langgraph`
+installed -- see note below; the pre-existing `test_phase10_fast_path_
+retry.py` suite, 19/19, needed no changes since its stub functions
+accept `**kwargs` and don't assert on `temperature`/`force_citations`
+specifically -- flagged as a real gap: those two new arguments are not
+yet directly asserted on by any test, only indirectly exercised via
+the stub's return-value branching).
+**Sandbox note, not a code change:** `rank_bm25` and `langgraph` were
+previously unavailable in this sandbox (documented gap since B-001/
+D-034), blocking `test_phase3_manual.py`, `test_phase5_graph.py`,
+`test_phase6_citation_eval_harness.py`, `test_phase6_graph_wiring.py`,
+`test_phase6_sources.py`, `test_phase9_ensure_model_available.py`,
+`test_phase_modes_ui.py`, `test_phase10_fast_path_retry.py`,
+`test_phase10_golden_set_eval.py`, and `test_phase10_judge_comparison.py`
+at various points. Both are now installed in this sandbox (`pip
+install rank_bm25 langgraph`), so this session's 376/376 is a wider
+sweep than prior sessions' "330/330 across 17 files" -- not a
+different regression baseline, just a previously-blocked set of files
+now runnable here too. Doesn't change anything about real-hardware
+confirmation status.
+**Not yet done:** real-hardware confirmation. Next run should show (1)
+whether `transistor invented` and `latest inflation rate` stop
+appearing in `WRONGLY REFUSED:` (this is the actual test of whether a
+corrective prompt + temperature bump does what a plain resample
+didn't), and (2) whether the answerable false-positive rate drops back
+toward 0% now that both of this run's specific causes are named and
+targeted. If either query still fails, that's real evidence the
+corrective-prompt approach itself needs rethinking (e.g. an even
+more explicit format like requiring the model to restate the fact
+inside a template), not proof the diagnostic approach was wrong.
+Separately, unchanged: Nintendo/D-067's evidence-contradiction gap
+remains open and untouched by this fix.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug` once more. Read the new debug line ("...retrying once
+with a corrective prompt + temperature=0.5") on the transistor and
+inflation queries specifically, and check both the retry notice text
+AND the final `WRONGLY REFUSED:`/clean-pass outcome.
+
+---
+
+### D-074 — Found the actual, deterministic root cause behind D-071/D-073 both firing and still failing: `_smooth_truncation()` silently deleted trailing citation tags placed AFTER the answer's final period
+
+**Context:** per an explicit request to check thoroughly rather than
+run another real-hardware round on unverified theories, re-read
+`rag/synthesis.py` end-to-end instead of continuing to treat "the
+model doesn't feel like citing well-known facts" as the working
+theory. Reproduced the bug directly in this sandbox, with no live
+model needed -- this is a pure code-logic bug, not a model-behavior
+guess.
+
+**The bug:** `_smooth_truncation()` (D-028, meant to trim a hard
+`max_tokens` cutoff back to the last complete sentence instead of
+showing a dangling word fragment) decides an answer "ends cleanly"
+by checking whether the LAST CHARACTER is `.`, `!`, or `?`. A citation
+tag placed after the final period -- "The transistor was invented in
+1947 at Bell Labs. [web:0]" -- ends in `]`, not `.`, so this function
+mistook a complete, correctly-cited answer for a mid-sentence
+truncation and trimmed the trailing citation away entirely. The
+resulting citation-less text is exactly what `_extract_citations()`
+and `core/guardrail.output_rail()` see -- both run AFTER
+`_smooth_truncation()` in `generate()`'s call order -- so a real
+citation the model actually wrote never had a chance to reach either
+of them.
+
+**Confirmed directly, reproducibly, in this sandbox** (see the
+verification note below) -- not inferred from behavior, actually
+executed against the real function:
+```
+_smooth_truncation("The transistor was invented in 1947 by Bardeen, "
+    "Brattain, and Shockley at Bell Labs. [web:0]")
+-> "The transistor was invented in 1947 by Bardeen, Brattain, and "
+   "Shockley at Bell Labs."          # citation silently gone
+```
+And end-to-end through the real `generate()` function with a stubbed
+model returning exactly that text: citations list comes back empty,
+`"[" in answer` is `False` -- i.e. `output_rail` would flag
+`no_citation_markers` on an answer the model DID cite correctly.
+
+**Why this explains the whole D-071/D-072/D-073 saga better than any
+prior theory:**
+- This bug is **deterministic**, not a sampling fluke. Any answer
+  where the model's natural citation style puts the tag after the
+  final punctuation -- extremely common for short, single-fact
+  answers like "what year was X invented" -- hits this every time,
+  independent of temperature. That's why D-071's identical-conditions
+  retry "fired but failed" (D-072's finding): a plain resample was
+  never going to fix a bug in Fathom's own post-processing.
+  D-073's `force_citations`/`temperature=0.5` retry was equally
+  unlikely to have fixed it for the same reason, though that specific
+  combination was never confirmed on real hardware before this fix
+  landed on top of it.
+- It explains why the SAME two queries (transistor, inflation) kept
+  recurring specifically -- both are short factual queries where a
+  single trailing citation at the very end is a highly natural
+  phrasing for a small model to produce, unlike longer synthesized
+  answers with several mid-text citations, where this bug can't fire
+  (a non-final citation is untouched either way).
+- It's consistent with the one place this DIDN'T reproduce: the
+  Python query (Entry 056) flipped from missed to caught on its
+  retry, plausibly because that retry's specific phrasing happened to
+  place the citation before the final period (or mid-answer) --
+  sampling at temperature=0.3 is not perfectly deterministic, so
+  different retries can land on different phrasing even without this
+  fix, explaining why the bug is real but not 100% reproducing on
+  every affected query every single time.
+
+**Fix:** `_smooth_truncation()` now strips any trailing citation
+tag(s) before judging whether the remaining text ends cleanly, and
+restores the full original string (citations included) once that
+core text is confirmed complete. Genuine mid-token truncation (no
+sentence-ending punctuation anywhere, with or without a citation at
+the cut point) is still trimmed/marked exactly as before -- this is
+strictly an additional case handled, not a behavior change to the
+original D-028 fix.
+
+**Explicitly NOT reverted:** D-073's `force_citations`/
+`temperature=0.5` corrective retry stays in place. It's still
+reasonable insurance against a genuine no-citation generation (the
+model truly omitting any `[source_id]` tag anywhere), which is a
+real, separate failure mode this fix doesn't touch -- D-074 fixes the
+"cited but the citation was in the wrong position" case specifically.
+
+**One known, narrower gap this fix does NOT close, named rather than
+hidden:** a citation attached to a sentence that is NOT the last
+content in a genuinely truncated (hit `max_tokens`) answer can still
+be dropped -- e.g. `"Fact one. [web:0] Fact two is still being
+generated and cuts off mid"` still trims to `"Fact one."`, losing
+`[web:0]`, because the trailing-citation check only looks at the very
+end of the string, and this case is a real mid-token truncation (there
+IS more, incomplete content after it), not the "already complete"
+case D-074 targets. This is strictly rarer (requires both a genuine
+`max_tokens` cutoff AND a non-final citation immediately before the
+cutoff point) and existed identically before this fix -- not a
+regression, but worth tracking if it ever shows up in real data.
+
+**Files touched:** `src/rag/synthesis.py` (`_smooth_truncation()` +
+new `_TRAILING_CITATIONS_PATTERN`), `test_phase4_manual.py` (+4
+checks: citation after period preserved, multiple trailing citations
+preserved, citation before period still works, genuinely-truncated-
+with-citation still marked cut short).
+**Verification:** 34/34 in `test_phase4_manual.py` (up from 30/30),
+380/380 across all 20 sandbox-runnable test files. Verified directly
+against the real `_smooth_truncation()` and `generate()` functions
+with reproducible inputs, not just against a theory -- see the code
+block above.
+**Not yet done:** real-hardware confirmation. This is the first fix
+in this entire investigation arc (D-066 through D-073) that is
+verifiable as correct without needing a real model run at all, since
+it's a deterministic string-processing bug -- but "verified as
+correct in isolation" and "confirmed to fix the golden-set false
+positives in practice" are still different claims until the actual
+run happens, per this project's own standing discipline.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug` once more. This time, specifically check whether
+`WRONGLY REFUSED:` no longer lists the transistor and inflation-rate
+queries. If either still appears, check the debug trace for whether
+D-071's/D-073's retry notice fired -- if it did and the query is STILL
+refused, that means the model is producing a genuinely uncited answer
+(not the D-074 pattern), which would point back toward a real model-
+behavior gap D-073 was meant to address, now isolated from this fix's
+effect for the first time.
+
+---
 **Return to `/context.md` for next steps.**

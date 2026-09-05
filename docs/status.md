@@ -7,6 +7,42 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 057): found the actual, deterministic root cause
+  D-071/D-072/D-073 were all working around without hitting it --
+  D-074/B-024. `_smooth_truncation()` (D-028) judged an answer
+  "complete" by its LAST CHARACTER being `.!?`; a citation placed
+  AFTER the final period (very natural for short single-fact answers,
+  e.g. "...Bell Labs. [web:0]") ends in `]`, so the function silently
+  deleted the citation, believing it was trimming a mid-sentence
+  truncation. This runs BEFORE citation extraction and output_rail
+  in `generate()`'s call order, so a real citation the model wrote
+  never got a chance to be seen. Reproduced directly against the real
+  functions in this sandbox -- no live model needed, not a guess.
+  This is deterministic (not sampling-dependent), which is why D-071's
+  plain retry and D-073's corrective-prompt+temperature retry could
+  both fire and still fail: neither touches a bug in Fathom's own
+  post-processing. Fixed: trailing citation tags are now stripped
+  before judging completeness, then restored once confirmed complete;
+  genuine mid-token truncation unaffected. D-073's retry mechanism
+  left in place (still real insurance against genuinely uncited
+  answers, a different failure mode). 380/380 across all 20 sandbox-
+  runnable test files. **NOT yet confirmed on real hardware.**
+- **UPDATE (Entry 056): D-072's `--debug` diagnostic run answered its
+  own question -- D-071's citation retry DOES fire on the transistor
+  and inflation-rate queries, but an identical-prompt/identical-
+  temperature resample doesn't fix a systematic (not random)
+  no-citation tendency, so both still ended up wrongly refused. A
+  third query (Python, `needs_evidence`) that the same retry DID fire
+  on flipped to correctly caught -- `needs_evidence` moved 66.7% ->
+  83.3% (4/6 -> 5/6), first movement all session. Nintendo (the
+  remaining `needs_evidence` miss) got NO retry notice at all,
+  confirming it's still D-067's separate, already-tracked
+  evidence-contradiction gap, untouched by any of this. Fixed
+  (D-073/B-023): the retry is now corrective, not a blind repeat --
+  `generate()` gained `force_citations=True` (explicit instruction
+  naming the exact prior failure) and the retry call's temperature
+  was raised 0.3 -> 0.5, first-attempt calls unaffected. **NOT yet
+  confirmed on real hardware.**
 - **UPDATE (Entry 050): D-066 CONFIRMED on real hardware** -- two more
   back-to-back real runs, both identical, zero `"0 sources"`
   occurrences, 0.0% answerable false-positive both times. **False-
@@ -136,6 +172,132 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 057
+**Phase:** 10, thorough re-audit requested instead of another blind real-hardware round -- found and fixed the actual deterministic root cause (D-074/B-024)
+**Action taken:** per explicit direction to check thoroughly before
+running anything else, re-read `rag/synthesis.py` end to end instead
+of trusting D-071/D-073's "the model just doesn't feel like citing"
+framing. Also re-checked `core/guardrail.py`, `tests/eval/golden_set_
+eval.py`'s scoring logic, and `rag/reranker.py` for other candidate
+bugs -- none found there; the eval harness's `_classify_result()` and
+`output_rail`'s structural check are both correct as written.
+
+**Found (D-074/B-024), reproduced directly in this sandbox with no
+live model:** `_smooth_truncation()` decides an answer "ends cleanly"
+by checking whether its LAST CHARACTER is `.`, `!`, or `?`. A citation
+placed after the sentence's closing punctuation -- "...Bell Labs.
+[web:0]", a natural way to close a short single-fact answer -- ends in
+`]`, so this function mistook a complete, correctly-cited answer for a
+mid-sentence truncation (D-028's actual target) and silently deleted
+the citation. `generate()` calls this BEFORE `_extract_citations()`
+and before the text ever reaches `output_rail`, so a real citation the
+model wrote was gone before either check saw it.
+
+**Why this is a stronger explanation than anything tried before:**
+it's deterministic, not a sampling artifact -- explaining exactly why
+D-071's plain retry and D-073's corrective-prompt+temperature retry
+both could fire (confirmed via `--debug` in Entry 056) and still fail:
+neither one touches Fathom's own post-processing bug. It also explains
+why specifically SHORT factual queries (transistor, inflation) kept
+recurring -- a single trailing citation at the very end is a much more
+natural phrasing for a one-fact answer than for a longer multi-claim
+synthesis, where this bug structurally can't fire (non-final citations
+are untouched).
+
+**Fix:** `_smooth_truncation()` now strips trailing citation tag(s)
+before judging completeness, restores them once the underlying
+sentence is confirmed complete. D-028's original truncation-smoothing
+behavior (mid-word cutoffs, no-complete-sentence-at-all cases) is
+unchanged -- purely an additional case now handled correctly.
+**Named, not hidden, remaining gap:** a citation attached to a
+non-final sentence in a genuinely `max_tokens`-truncated answer can
+still be dropped (existed identically before this fix, out of scope
+for D-074 specifically).
+**Decisions/bugs logged:** D-074, B-024.
+**Files touched:** `src/rag/synthesis.py`, `test_phase4_manual.py`
+(+4 checks).
+**Regression status:** 380/380 across all 20 sandbox-runnable test
+files (34/34 in `test_phase4_manual.py` specifically, up from 30/30).
+**Not yet done:** real-hardware confirmation -- this fix is unusually
+verifiable without one (pure deterministic string logic, demonstrated
+with concrete before/after pairs), but "correct in isolation" and
+"confirmed to fix the golden-set numbers in practice" remain separate
+claims until the actual run happens.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug` once more. Check specifically whether the transistor
+and inflation-rate queries stop appearing in `WRONGLY REFUSED:`. If
+either still does, check whether D-071's/D-073's retry notice fired --
+if it did and the query is STILL refused, that isolates a genuine
+model-behavior gap (truly zero citations, not this positioning bug)
+for the first time, cleanly separated from D-074's effect. Nintendo/
+D-067's evidence-contradiction gap remains separately open regardless.
+
+### Entry 056
+**Phase:** 10, D-072's requested `--debug` run gave a direct, unambiguous answer; root-caused and fixed as D-073/B-023
+**Action taken:** user ran `python tests/eval/golden_set_eval.py
+--debug`, exactly the command D-072 asked for. Read the stderr trace
+per-query against the final report rather than the headline numbers
+alone.
+
+**Answered D-072's open question directly:** the citation retry DOES
+fire on both queries it was meant to fix ("transistor invented",
+"latest inflation rate") -- the debug line appears for both -- but
+both still ended up `WRONGLY REFUSED`/`output_rail` in the final
+report. Not "never triggered"; "triggered and failed anyway," now
+provably not the same thing as suspected.
+
+**New, not previously named:** "latest inflation rate" is a SECOND
+query hitting this exact failure mode -- previously only the
+transistor query had ever shown up in `WRONGLY REFUSED:` (Entry 054/
+055). Answerable false-positive rate is 20.0% this run (up from
+10.0%), and this run's trace makes both contributors nameable instead
+of one named + one mystery.
+
+**Real, positive movement, same run:** the Python query (`needs_
+evidence`, false_premise) also got the citation retry -- and this
+time it flipped to correctly caught. `needs_evidence` moved 66.7% ->
+83.3% (4/6 -> 5/6), the first movement on this subset since D-070
+first flagged it as stuck. Nintendo (the remaining miss) got NO retry
+notice at all -- first `generate()` call already had citations --
+confirming its failure is unrelated to citations and is still D-067's
+original evidence-contradiction gap, not something this session's work
+was ever going to touch.
+
+**D-073/B-023 fix:** root-caused to the retry using the identical
+prompt at the identical `temperature=0.3` as the first attempt --
+reasonable for a random fluke (D-066's retry, which works), wrong for
+a systematic "the model judges this fact as already-known, so it
+skips citing it" tendency, which a same-conditions resample has little
+reason to disrupt. Made the retry corrective: `rag/synthesis.generate()`
+gained `force_citations=True` (explicit prompt addendum naming the
+exact prior failure), and `main.py`'s retry call now also raises
+`temperature` to 0.5 for that one call only. First attempts, and every
+other `generate()` caller, are unaffected.
+**Decisions/bugs logged:** D-073, B-023.
+**Regression status:** all 20 sandbox-runnable test files pass
+(376/376 total checks) -- also installed `rank_bm25` and `langgraph`
+in this sandbox this session, unblocking several files (`test_phase3_
+manual.py`, `test_phase5_graph.py`, `test_phase6_citation_eval_
+harness.py`, `test_phase6_graph_wiring.py`, `test_phase6_sources.py`,
+`test_phase9_ensure_model_available.py`, `test_phase_modes_ui.py`,
+`test_phase10_fast_path_retry.py`, `test_phase10_golden_set_eval.py`,
+`test_phase10_judge_comparison.py`) that were previously blocked here
+by a missing-dependency gap (same class as B-001) -- not a different
+regression baseline than prior sessions' "330/330 across 17 files,"
+just a wider sweep now possible in this sandbox specifically. No test
+directly asserts on the new `force_citations`/`temperature=0.5`
+arguments yet -- the existing retry test's stubs accept `**kwargs` and
+pass by construction, not by checking those specific values; flagged
+as a real, if minor, coverage gap.
+**Not yet done:** real-hardware confirmation of D-073 itself.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug` again. Check specifically whether the transistor and
+inflation-rate queries stop appearing in `WRONGLY REFUSED:`, and
+whether the answerable false-positive rate drops back toward 0% now
+that both of this run's specific causes have a targeted fix. Nintendo/
+D-067's evidence-contradiction gap remains separately open regardless
+of this run's outcome.
 
 ### Entry 055
 **Phase:** 10, two identical back-to-back runs confirm real stability; D-071's effect on its own target UNDETERMINED -- added --debug to the eval harness instead of guessing again
