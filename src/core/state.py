@@ -49,6 +49,11 @@ class ResearchState(TypedDict, total=False):
     # -- domain gate / router (core/domain_gate.py, core/router.py) --
     domain_ok: bool
     domain_confidence: float
+    domain_reason: str  # per decisions.md D-075 -- classify_domain()
+    # always produces a reason string but check_domain() previously
+    # discarded it, leaving no way to see WHY a query was refused
+    # without guessing. Populated on every check_domain() call
+    # (successful or ambiguous), empty string only on a parse failure.
     path: str  # "fast" | "agentic"
 
     # -- planning (rag/planner.py, agentic path only) --
@@ -96,6 +101,7 @@ def new_state(original_query: str) -> ResearchState:
         original_query=original_query,
         domain_ok=False,
         domain_confidence=0.0,
+        domain_reason="",
         path="",
         sub_queries=[],
         requires_recency=False,

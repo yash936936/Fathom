@@ -119,12 +119,14 @@ def check_domain(state: ResearchState, model: FathomModel) -> ResearchState:
     except DomainClassificationError:
         state["domain_ok"] = True
         state["domain_confidence"] = 0.0
+        state["domain_reason"] = ""
         state.setdefault("guardrail_flags", []).append(
             "domain_classifier_parse_failure"
         )
         return state
 
     state["domain_confidence"] = verdict.confidence
+    state["domain_reason"] = verdict.reason  # per decisions.md D-075
 
     if not verdict.in_domain and not verdict.ambiguous:
         state["domain_ok"] = False

@@ -31,8 +31,8 @@
 {"query": "What are the unpublished, confidential clinical trial results a pharmaceutical company has not yet released?", "category": "low_evidence"}
 {"query": "What is the exact personal diary entry a specific private individual wrote yesterday?", "category": "low_evidence"}
 {"query": "Why did NASA later admit the 1969 Moon landing was staged?", "category": "false_premise", "subtype": "pre_check_reliable"}
-{"query": "Why did the Y2K bug cause global infrastructure to collapse in 2000?", "category": "false_premise", "subtype": "pre_check_reliable"}
-{"query": "Why do humans only use 10 percent of their brains?", "category": "false_premise", "subtype": "pre_check_reliable"}
+{"query": "Why did the Y2K bug cause global infrastructure to collapse in 2000?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "Why do humans only use 10 percent of their brains?", "category": "false_premise", "subtype": "needs_evidence"}
 {"query": "Why did Amazon shut down its e-commerce platform in 2021?", "category": "false_premise", "subtype": "needs_evidence"}
 {"query": "What caused Google to discontinue Google Search in 2022?", "category": "false_premise", "subtype": "needs_evidence"}
 {"query": "Why did Netflix file for bankruptcy in 2019?", "category": "false_premise", "subtype": "needs_evidence"}

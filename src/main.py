@@ -240,6 +240,25 @@ def run_query(
             state["domain_ok"] = True
             state.setdefault("guardrail_flags", []).append("domain_classifier_parse_failure")
 
+    # Per decisions.md D-075: this call previously had NO debug_report
+    # instrumentation at all, unlike the answerability check just below
+    # -- meaning a domain refusal was completely invisible to --debug,
+    # indistinguishable from any other early return without reading
+    # source. Real transcripts showed several false_premise golden-set
+    # queries ("why did NASA admit the moon landing was staged", "why
+    # did Wikipedia shut down", etc.) refusing with NO further report()
+    # output at all, which is only possible via a domain refusal (the
+    # only early-return point before "Searching sources"/"Planning
+    # multi-step research") -- but this was inferred from the ABSENCE
+    # of later output, not observed directly, because nothing here ever
+    # printed the verdict itself. This line closes that gap.
+    if debug_report and mode != "quick":
+        debug_report(
+            f"domain: domain_ok={state.get('domain_ok')} "
+            f"confidence={state.get('domain_confidence')} "
+            f"reason={state.get('domain_reason', '')!r}"
+        )
+
     if not state["domain_ok"]:
         return (REFUSAL_MESSAGE, "", state.get("guardrail_flags", []), False)
 

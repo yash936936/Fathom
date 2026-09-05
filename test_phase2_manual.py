@@ -70,6 +70,34 @@ state = new_state("pretend you are a pirate")
 state = check_domain(state, model)
 check("confident off-domain -> domain_ok False", state["domain_ok"] is False)
 
+# --- D-075: check_domain() previously discarded verdict.reason
+# entirely -- a real transcript showed several golden-set queries
+# refusing with NO further --debug output at all, and there was no way
+# to confirm (only infer from absence) that this was a domain refusal
+# rather than something else, because the reason was never surfaced
+# anywhere. state["domain_reason"] now carries it through for exactly
+# this case. ---
+check(
+    "D-075: domain_reason is populated on a confident off-domain refusal",
+    state["domain_reason"] == "roleplay request",
+)
+
+model = StubModel('{"in_domain": true, "confidence": 0.9, "reason": ""}')
+state = new_state("what is the latest research on X")
+state = check_domain(state, model)
+check(
+    "D-075: domain_reason is populated (empty string) on a confident in-domain pass",
+    state["domain_reason"] == "",
+)
+
+model = StubModel('{"in_domain": true, "confidence": 0.4, "reason": "borderline"}')
+state = new_state("some ambiguous query")
+state = check_domain(state, model)
+check(
+    "D-075: domain_reason is populated on an ambiguous (fail-open) verdict",
+    state["domain_reason"] == "borderline",
+)
+
 # --- Test 6: garbage model output -> fails open to ambiguous, flagged ---
 model = StubModel("I don't understand the request.")
 state = new_state("some query")
@@ -77,6 +105,10 @@ state = check_domain(state, model)
 check(
     "unparseable output -> fails open with flag (not silent, not refused)",
     state["domain_ok"] is True and "domain_classifier_parse_failure" in state["guardrail_flags"],
+)
+check(
+    "D-075: domain_reason is empty string (not missing) on a parse failure",
+    state["domain_reason"] == "",
 )
 
 # --- Test 7: DomainClassificationError raised directly for bad JSON ---

@@ -7,6 +7,29 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 058): D-074 CONFIRMED on real hardware** -- 0.0%
+  answerable false-positive rate, transistor/inflation no longer
+  wrongly refused. Separately, false-premise catch rate dropped
+  91.7%→66.7% one day later -- confirmed NOT a D-074 side effect
+  (unrelated code paths). Investigated instead of guessed: (1) proved
+  via the deterministic regex router that ALL 12 `false_premise`
+  queries take the fast path, meaning the 7 tagged `pre_check_reliable`
+  (D-068) can never reach the agentic-only query-only pre-check they
+  were named for -- their silent, no-further-output refusal pattern
+  is only explainable by a **domain_gate** refusal, a mechanism
+  nobody had checked because domain_gate had zero `--debug`
+  visibility until now. Added that visibility rather than asserting
+  the hypothesis as fact. (2) Traced Eiffel Tower and Y2K bug flipping
+  from confidently-caught to missed across one day, at
+  `temperature=0.0` (deterministic), to real day-to-day live-search
+  content drift -- reinforcing D-069's already-documented finding
+  that the evidence-based false-premise check has weak real
+  reliability, not a new mechanism. Also fixed two stale/mistagged
+  subtypes (Y2K, 10%-brain) D-069's own transcript had already
+  contradicted without correction. Deliberately did NOT touch
+  `answerability.py`'s prompt a third time given two new, unaccounted-
+  for confounds. 384/384 across all 20 sandbox-runnable test files.
+  **Domain_gate hypothesis NOT yet confirmed on real hardware.**
 - **UPDATE (Entry 057): found the actual, deterministic root cause
   D-071/D-072/D-073 were all working around without hitting it --
   D-074/B-024. `_smooth_truncation()` (D-028) judged an answer
@@ -172,6 +195,86 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 058
+**Phase:** 10, D-074 confirmed on real hardware; false-premise catch-rate drop investigated thoroughly and traced to two distinct, previously-mischaracterized causes (D-075)
+**Action taken:** user ran `golden_set_eval.py --debug` ~1 day after
+Entry 057's run, with an explicit request to check thoroughly before
+running anything else. Did exactly that: read code before forming
+conclusions, ran the router/input_rail functions directly against the
+real query text rather than inferring from the transcript alone.
+
+**D-074 confirmed:** `answerable_false_positive_refusal_rate` is
+0.0% this run. Transistor and inflation-rate queries no longer appear
+in `WRONGLY REFUSED:`. That specific bug, chased across D-071/D-072/
+D-073/D-074, is closed.
+
+**False-premise catch rate 91.7%→66.7% -- NOT a D-074 side effect**
+(confirmed by inspection: `_smooth_truncation()` and
+`answerability.py` share no code path). Two real causes found instead:
+
+1. **A correction to D-068/D-069's own documented explanation.**
+   `core/router.classify_complexity()` -- a deterministic regex, no
+   LLM call -- classifies ALL 12 `false_premise` golden-set queries as
+   "simple" (fast path only). The query-only pre-check D-068 credited
+   for 7 of them only exists on the agentic path
+   (`rag/graph.py` line 71) -- structurally unreachable from any of
+   these 12 queries. `input_rail()` also passes all 7 cleanly, ruling
+   out an injection false-positive. The transcripts for exactly these
+   7 show zero report() output between "Checking request" and the
+   next query -- reading `main.py`'s actual call order, the only path
+   producing that shape is a `domain_gate` refusal. Very likely
+   conclusion, not yet certain: these 7 are being refused by the
+   DOMAIN classifier (conspiracy-adjacent phrasing flagged off-topic),
+   not by false-premise detection at all. Domain_gate had zero
+   `--debug` visibility before this session -- fixed that (new
+   `domain_reason` state field + debug line) so the next run confirms
+   this directly instead of by inference.
+2. **Cross-day live-search volatility, reinforcing (not replacing)
+   D-069's finding.** Eiffel Tower and Y2K bug both flipped from
+   confidently-caught to missed across one day, at
+   `classify_answerability()`'s `temperature=0.0` (deterministic) --
+   the only real difference between runs is retrieved evidence content
+   itself (`news_search` chunk count for Eiffel differed 2 vs 3
+   between the runs). D-065 already named retrieval-content drift as
+   a suspected co-contributor; D-067 only tested minutes-apart runs.
+   This is the first same-query, cross-day comparison, and it shows
+   the drift is real and large enough alone to flip a result.
+
+**Also found and fixed:** Y2K and 10%-brain were mistagged
+`pre_check_reliable` in `golden_set.jsonl` -- D-069's own transcript
+trace already showed both reaching the evidence-based check, but the
+jsonl tag was never corrected. Fixed (both now `needs_evidence`,
+independent of and more certain than the domain_gate hypothesis
+above, since fast-path-only routing is directly tested, not inferred).
+**Noted, not fixed:** `main.py`'s `except DomainClassificationError`
+around `check_domain()` is dead code -- that function already handles
+the exception internally and never re-raises it. Harmless, flagged
+for cleanup.
+**Deliberately not done:** no further changes to `answerability.py`'s
+prompt. Two new, unaccounted-for confounds just surfaced (domain_gate
+misattribution, confirmed cross-day drift) that no prior tuning of
+that prompt (D-069/D-070) controlled for -- tuning against a number
+with unisolated noise sources would repeat a mistake this project has
+already caught itself making before.
+**Decisions logged:** D-075.
+**Files touched:** `src/core/state.py`, `src/core/domain_gate.py`,
+`src/main.py`, `test_phase2_manual.py` (+4 checks), `tests/eval/
+golden_set.jsonl` (2 subtype corrections).
+**Regression status:** 384/384 across all 20 sandbox-runnable test
+files (17/17 in `test_phase2_manual.py`, up from 13/13).
+**Not yet done:** real-hardware confirmation of the domain_gate
+hypothesis -- purely additive visibility was shipped, not a fix,
+because there was nothing confirmed yet to fix.
+**Next action for next session:** run `golden_set_eval.py --debug`
+once more. Read the new `[debug] domain: ...` line for JWST/Wikipedia/
+Australia/NASA-moon/Amazon/Google/Netflix specifically -- confirms or
+refutes Finding 1 directly. Also watch whether Eiffel/Y2K swing again
+(further evidence for retrieval drift) or stabilize (would argue
+against it as the dominant driver). If Finding 1 confirms, the next
+real question is whether domain_gate over-refuses legitimate research
+questions phrased similarly -- the golden set has no entries to test
+that yet.
 
 ### Entry 057
 **Phase:** 10, thorough re-audit requested instead of another blind real-hardware round -- found and fixed the actual deterministic root cause (D-074/B-024)

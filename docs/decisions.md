@@ -3270,4 +3270,199 @@ behavior gap D-073 was meant to address, now isolated from this fix's
 effect for the first time.
 
 ---
+
+### D-075 — D-074 CONFIRMED on real hardware (transistor + inflation no longer wrongly refused, 0.0% false-positive rate). Separately: false-premise catch rate collapsed 91.7%→66.7% one day later -- traced to TWO distinct, previously-mischaracterized causes, not a D-074 side effect
+
+**Context:** user ran `golden_set_eval.py --debug` again, ~1 day after
+Entry 056/057's run. Explicit ask: check thoroughly rather than run
+another blind real-hardware round on an unverified theory.
+
+**Good news first, and don't let it get lost in what follows:**
+`answerable_false_positive_refusal_rate` is **0.0%** this run. Neither
+the transistor query nor the inflation-rate query appears in
+`WRONGLY REFUSED:` -- D-074's fix is now confirmed on real hardware,
+not just verified in isolation. That specific, multi-session bug is
+closed.
+
+**The other number moved a lot in the other direction:**
+false-premise catch rate dropped to 66.7% (was 91.7% one run prior).
+Ruled out immediately: D-074 only touches `_smooth_truncation()`,
+which has no code path connection to `verification/answerability.py`
+at all -- confirmed by reading both files side by side. Whatever
+caused this drop, it isn't this session's own fix.
+
+**Investigated instead of guessed. Two distinct findings, not one:**
+
+**Finding 1 -- a correction to this project's own prior documentation.**
+D-068/D-069 describe 7 of the 12 `false_premise` queries (JWST,
+Wikipedia, Australia, NASA-moon, Amazon, Google, Netflix) as "caught
+by the query-only PRE-check" and tagged them `pre_check_reliable` on
+that basis. Checked this claim directly against the actual code and
+the actual transcripts (both this run and Entry 056's):
+- `core/router.classify_complexity()` is a **pure, deterministic
+  regex heuristic** -- ran it directly against the text of all 12
+  `false_premise` queries: **every single one classifies "simple"**,
+  meaning all 12 always take the fast path (`main.py`), never the
+  agentic path.
+- The query-only pre-check `_SYSTEM_PROMPT_QUERY_ONLY` only exists at
+  `rag/graph.py` line 71 -- **agentic-path only**. It is structurally
+  impossible for any of these 12 queries to ever reach it via
+  `golden_set_eval.py`, regardless of subtype tag.
+- Checked `input_rail()` directly against all 7 "pre_check_reliable"
+  query strings -- all pass cleanly, ruling out an injection-pattern
+  false-positive as the mechanism.
+- The transcripts for exactly these 7 queries show **zero report()
+  output** between "Checking request" and the next query -- no
+  "Searching sources", no "Planning multi-step research". Reading
+  `main.py`'s actual call order, the ONLY code path that returns with
+  zero further output at that point is a **domain_gate refusal**
+  (`state["domain_ok"] is False`, immediate return, no more report()
+  calls) -- there is no other way to produce that exact transcript
+  shape given the confirmed "simple"/fast-path classification above.
+
+**Conclusion: these 7 queries are very likely being refused by
+`core/domain_gate.py`'s domain classifier, not by any false-premise
+detection mechanism at all.** This is a different, previously
+unidentified explanation for D-068/D-069's "pre_check_reliable"
+label -- it isn't testing answerability's pre-check reliability, it's
+(most likely) testing whether the domain classifier happens to flag
+"why did [real institution] do [conspiratorial/false thing]" phrasing
+as off-topic. Stated as "very likely" and "most likely," not
+certain, because this was never directly observable before this
+session -- domain_gate's own verdict had **zero `--debug`
+instrumentation**, unlike answerability's, so confirming this
+required inference from the absence of later output, not a direct
+read of the verdict. Fixed the visibility gap itself (see below) so
+the next run gives a direct answer instead of another inference.
+
+**Why this matters beyond just relabeling:** if true, it means over
+half of the `false_premise` golden-set entries are not exercising
+false-premise detection at all, and raises a real, previously-unasked
+question: is the domain classifier over-firing on legitimate research
+questions that happen to be phrased like these ("why did X do Y")
+just because they touch conspiracy-adjacent subjects? That's a
+genuinely different risk than anything tracked so far (a
+false-domain-refusal failure mode, distinct from D-066's
+retrieval-empty and D-074's citation-position bugs), and the golden
+set currently has no entries that would surface it (no "why did
+[real institution] do [true, mundane thing]" queries to check the
+classifier isn't systematically over-refusing this phrasing pattern).
+**Not fixed this session -- flagged, with instrumentation added to
+confirm the mechanism directly on the next run before deciding what,
+if anything, to change.**
+
+**Finding 2 -- separately, real evidence that the `needs_evidence`
+mechanism's reliability is even weaker than D-069 already found, now
+compounded by cross-day live-search volatility.** Of the (corrected,
+see below) `needs_evidence` queries, the split across the two most
+recent runs:
+
+| Query | Entry 056 run (Sept 4) | This run (Sept 5) |
+|---|---|---|
+| Eiffel Tower | caught, confident (`answerable=False`) | **missed**, ambiguous |
+| Python discontinued | caught (via D-073's retry) | missed |
+| Nintendo | missed | missed |
+| Y2K bug | caught, confident | **missed**, ambiguous |
+| 10%-brain myth | caught, confident | caught, confident |
+
+Two queries (Eiffel, Y2K) that were confidently caught one day flipped
+to ambiguous-and-missed the next, on the identical query text, with
+`classify_answerability()` running at `temperature=0.0` (deterministic
+by design). The only thing that legitimately differs between the two
+runs is the retrieved evidence content itself -- `news_search`
+returned a different chunk count for the Eiffel Tower query between
+the two runs (2 vs 3), directly confirming live search results are
+not stable day-to-day. D-065 already named "live-retrieval content
+drift" as a suspected co-contributor to run-to-run swings, and D-067
+found catch rate stable across two runs **minutes apart** -- this is
+the first real data point spanning a **full day**, and it shows the
+drift D-065 flagged as a co-suspect is real and large enough, on its
+own, to flip a query from confidently-caught to missed. This is not a
+new mechanism -- it's D-069's already-documented finding (the
+evidence-based check has a very weak, inconsistent real catch rate)
+getting MORE evidence, not less, and reinforced by a source of
+variance (day-to-day search drift) this project already suspected but
+had never isolated with a same-query, cross-day comparison before.
+
+**Also found and fixed in this investigation -- a real, previously
+unfixed documentation bug:** D-069's own transcript trace (quoted
+verbatim in decisions.md) already listed Y2K bug and 10%-brain-myth
+as reaching "full retrieval, evaluated by the EVIDENCE-based check" --
+directly contradicting their `pre_check_reliable` tag, which per
+Finding 1 above is provably wrong for any of these 12 queries in the
+first place, but was NEVER corrected in `golden_set.jsonl` after
+D-069 identified the contradiction. Fixed: both retagged
+`needs_evidence`. `needs_evidence` subset is now genuinely n=7, not
+n=6/n=5 -- worth noting because 10%-brain-myth has now caught
+confidently in BOTH observed runs, which is a real, if small, positive
+data point suggesting not every `needs_evidence` query is equally
+unreliable (very explicit, heavily-corroborated myths may work better
+than harder-to-corroborate specific-event claims like Eiffel/Nintendo).
+
+**Fix shipped this session (visibility only, no behavior change):**
+`core/state.py` gained `domain_reason: str` on `ResearchState`
+(previously `check_domain()` computed `verdict.reason` and discarded
+it entirely -- there was no way to see WHY a domain refusal fired,
+mirroring exactly the gap D-072 already closed for answerability).
+`core/domain_gate.check_domain()` now populates it on every path
+(confident pass, ambiguous fail-open, confident refusal, parse
+failure). `main.py` now calls `debug_report()` with the domain
+verdict immediately after the check, symmetric to the existing
+answerability debug line. Zero behavior change -- purely additive
+visibility, same as D-072's original `--debug` plumbing.
+
+**Also fixed:** the two mistagged `golden_set.jsonl` subtype entries
+(Y2K, 10%-brain: `pre_check_reliable` → `needs_evidence`), a
+provably-correct fix independent of the domain_gate hypothesis above
+(the fast-path-only routing is 100% deterministic and directly
+tested, not inferred).
+
+**Also noted, not fixed (out of scope, harmless):** `main.py`'s
+`try/except DomainClassificationError` around the `check_domain()`
+call is dead code -- `check_domain()` already catches that exception
+internally and fails open, so it never propagates to this outer
+handler. Harmless (the internal handling is correct), but worth
+cleaning up sometime rather than leaving misleading defensive code in
+place.
+
+**Explicitly NOT done this session, and why:** did not touch
+`answerability.py`'s prompt/criteria again. D-067 already warned
+against changing this classifier on the strength of a small, noisy
+golden-set subset without knowing what's actually driving a given
+run's number -- doing that now, on top of TWO newly-identified
+confounds (the domain_gate misattribution, and confirmed cross-day
+retrieval drift) that weren't accounted for in ANY prior tuning of
+that prompt (D-069/D-070's changes), would risk tuning against noise
+sources that were never isolated. The right next step is confirming
+the domain_gate hypothesis directly (now instrumented) and, ideally,
+re-running against pinned/cached retrieval (D-065's option 3, still
+not implemented) before touching the classifier prompt a third time.
+
+**Files touched:** `src/core/state.py` (+`domain_reason` field),
+`src/core/domain_gate.py` (populate it), `src/main.py` (debug_report
+call), `test_phase2_manual.py` (+3 checks), `tests/eval/golden_set.jsonl`
+(2 subtype corrections, entry count unchanged at 38).
+**Verification:** 17/17 in `test_phase2_manual.py` (up from 13/13),
+384/384 across all 20 sandbox-runnable test files. JSONL validated as
+well-formed post-edit (38 entries, same as before).
+**Not yet done:** the actual confirmation this entry sets up. Next
+`golden_set_eval.py --debug` run will show a `[debug] domain: ...`
+line for every query for the first time -- check it directly for the
+7 previously-unexplained queries (does `domain_ok=False` actually
+appear, and what does `domain_reason` say?) instead of inferring from
+absence of output again. Also watch whether Eiffel/Y2K swing again on
+a THIRD run -- if they do, that's further confirmation of retrieval-
+content-drift as a real, recurring driver, not a one-off.
+**Next action for next session:** run `--debug` once more. Read the
+new `domain:` line for JWST/Wikipedia/Australia/NASA-moon/Amazon/
+Google/Netflix specifically. If `domain_ok=False` for all 7, Finding 1
+above is confirmed and the real next question becomes whether the
+domain classifier's scope is too aggressive on this phrasing pattern
+(would need new answerable-category golden-set entries phrased
+similarly to test for over-refusal, which doesn't exist yet). If any
+show `domain_ok=True`, the mechanism catching them is something else
+entirely and needs fresh investigation, not retrofitted to this
+entry's hypothesis.
+
+---
 **Return to `/context.md` for next steps.**
