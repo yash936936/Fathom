@@ -3465,4 +3465,122 @@ entirely and needs fresh investigation, not retrofitted to this
 entry's hypothesis.
 
 ---
+
+### D-076 — D-075's Finding 1 CONFIRMED directly via the new debug line, not by inference. Correction beyond D-075: Amazon/Google/Netflix were ALSO mistagged. Subtype taxonomy renamed to match the confirmed mechanism.
+
+**Context:** user ran `golden_set_eval.py --debug` again, now with
+D-075's `domain:` debug line in place. This is the first run where
+domain_gate's actual verdict is directly visible, not inferred from
+the absence of later output.
+
+**Finding 1 from D-075 is now CONFIRMED, not just well-argued:** the
+new debug line shows `domain_ok=False` explicitly for JWST, Wikipedia,
+Australia, and NASA-moon-landing -- e.g. `domain: domain_ok=False
+confidence=0.95 reason='The James Webb Space Telescope did not shut
+down in 2019; it was launched in 2021 and has been operational since
+then.'` This is a real domain_gate refusal, directly observed, for
+every query D-075 hypothesized about. The mechanism is domain_gate, as
+suspected -- not the agentic-only query-only pre-check D-068/D-069
+credited.
+
+**A further correction beyond D-075's scope, found by reading this
+run's full trace rather than stopping at "hypothesis confirmed":**
+Amazon, Google, and Netflix -- tagged `needs_evidence` since D-068,
+untouched by D-075's retagging -- **also** show `domain_ok=False` this
+run (`'Amazon did not shut down its e-commerce platform in 2021'`,
+etc.), with the same "zero further output" transcript shape these
+three have shown in every prior run pasted into this project
+(re-checked: Entry 054/055/056/057's transcripts all show Amazon/
+Google/Netflix stopping dead after "Checking request", identical to
+the JWST/Wikipedia/Australia/NASA-moon pattern -- this was available
+evidence before D-075, just not connected to the right explanation
+until domain_gate had debug visibility). These three were mistagged
+in the OTHER direction from Y2K/10%-brain: D-068 assumed they'd behave
+like Eiffel/Python/Nintendo (reach full retrieval, evaluated by the
+evidence-based check) "by construction," but they never have, in any
+observed run. Retagged to match Amazon/Google/Netflix's actual,
+now-directly-confirmed mechanism.
+
+**Taxonomy renamed, not just re-sorted:** `pre_check_reliable` implied
+a mechanism (`rag/graph.py`'s agentic-only query-only check) that is
+structurally unreachable by any `false_premise` golden-set query (all
+12 route "simple"/fast-path -- D-075). Keeping that name after
+confirming the real mechanism is domain_gate would leave the same
+misleading label in place that caused D-068/D-069 to describe the
+wrong code path in the first place. Renamed to `domain_gate_refused`
+across `golden_set.jsonl`, `tests/eval/golden_set_eval.py`'s report
+labels ("pre-check-reliable subset" → "domain-gate-refused subset"),
+and `test_phase10_golden_set_eval.py`'s fixtures/assertions.
+
+**Resulting subtype split (`false_premise`, n=12 total):**
+- `domain_gate_refused` (n=7): JWST, Wikipedia, Australia, NASA-moon,
+  Amazon, Google, Netflix -- all directly confirmed `domain_ok=False`
+  this run, all showing the identical "no further output" transcript
+  shape across every prior run too.
+- `needs_evidence` (n=5): Eiffel Tower, Python discontinued, Nintendo,
+  Y2K bug, 10%-brain-myth -- all directly confirmed to pass
+  `domain_ok=True` (or fail open on low confidence, e.g. Nintendo's
+  `confidence=0.3` this run) and reach the evidence-based answerability
+  check.
+
+**A genuinely new observation from the same trace, not yet acted
+on:** domain_gate's own `reason` field, even when it returns
+`domain_ok=True`, is frequently answering the TRUTH of the premise
+rather than a topic-domain judgment -- e.g. Eiffel Tower this run got
+`domain_ok=True confidence=0.95 reason='The Eiffel Tower did not
+collapse in 1990; it has been standing since 1889...'`. The model is
+folding "is this premise true" into a prompt meant to classify "is
+this a legitimate research topic," which is a plausible explanation
+for why some false-premise queries unpredictably land on one side of
+the domain gate or the other (Eiffel Tower has been `domain_ok=True`
+in the only run where this was directly observable, but its evidence-
+based catch has also flipped between confident-catch and ambiguous-
+miss across different days per D-075 Finding 2 -- these may be the
+same underlying cause, the model applying inconsistent truth-
+judgment reasoning in two different prompts, not two unrelated
+issues). **Not investigated further this session** -- flagged as the
+most promising next thread, but doing it justice needs its own
+dedicated look at `domain_gate.py`'s prompt, not a rushed addendum
+here.
+
+**Why this is now graduated from "instrumentation" to "understood":**
+D-075 shipped visibility without asserting the mechanism; this run
+supplies the direct evidence D-075 was explicitly waiting for. The
+false-premise catch rate's `domain_gate_refused` subset can now be
+read at face value (100% across every run so far, all 7 queries,
+n=7) -- worth flagging that 100% here is a WEAKER signal than it
+looks, since it says more about domain_gate reliably flagging
+obviously-false claims about extremely famous entities/events than
+about anything specific to false-premise reasoning. It says nothing
+about whether domain_gate might ALSO be over-refusing legitimate
+questions phrased similarly -- the golden set still has no entries to
+test that, unchanged from D-075's open item.
+
+**Files touched:** `tests/eval/golden_set.jsonl` (7 entries retagged/
+renamed to `domain_gate_refused`, entry count unchanged at 38),
+`tests/eval/golden_set_eval.py` (subtype label rename, comments
+updated), `test_phase10_golden_set_eval.py` (fixtures/assertions
+renamed to match).
+**Verification:** 384/384 across all 20 sandbox-runnable test files
+(47/47 in `test_phase10_golden_set_eval.py`, unchanged count -- pure
+rename, no new behavior). JSONL validated well-formed, 38 entries,
+new split confirmed 7/5.
+**Not yet done:** deeper investigation of domain_gate's prompt
+conflating topic-classification with truth-judgment (the new
+observation above) -- named as the most promising next thread, not
+acted on. Also unchanged from D-075: no golden-set entries yet exist
+to test whether domain_gate over-refuses legitimate "why did real
+institution do real thing" questions.
+**Next action for next session:** either (a) run `--debug` a further
+time to see whether `domain_gate_refused`'s 7 queries stay at 100%
+confidence/consistency across yet another day, further testing
+whether this subset is as stable as it looks so far, or (b) start the
+domain_gate prompt investigation directly -- read
+`_SYSTEM_PROMPT`/few-shot examples in `core/domain_gate.py` and check
+whether they ever show the model an example of a false-premise
+question that should still be `in_domain=true` (if no such example
+exists, that's a plausible, fixable reason the model conflates the
+two judgments).
+
+---
 **Return to `/context.md` for next steps.**

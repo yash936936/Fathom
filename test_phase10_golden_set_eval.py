@@ -236,16 +236,16 @@ formatted_empty_verdicts = format_hallucination_verdicts([])
 check("format_hallucination_verdicts handles zero candidates without crashing", "0/0" in formatted_empty_verdicts)
 
 # --- Test 13 (D-068): subtype-aware false-premise catch rate. A
-# blended catch rate hides that pre_check_reliable and needs_evidence
+# blended catch rate hides that domain_gate_refused and needs_evidence
 # are caught by two different mechanisms -- confirm the breakdown is
 # computed correctly and independently of the blended number. ---
 subtype_report = GoldenSetReport(results=[
-    GoldenSetResult(query="q1", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="pre_check_reliable"),
-    GoldenSetResult(query="q2", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="pre_check_reliable"),
+    GoldenSetResult(query="q1", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="domain_gate_refused"),
+    GoldenSetResult(query="q2", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="domain_gate_refused"),
     GoldenSetResult(query="q3", category="false_premise", refused=False, refusal_type=None, has_citations=True, has_low_confidence_caveat=False, flags=[], subtype="needs_evidence"),
     GoldenSetResult(query="q4", category="false_premise", refused=True, refusal_type="answerability", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="needs_evidence"),
 ])
-check("D-068: pre_check_reliable subset rate computed correctly (2/2 = 100%)", subtype_report.false_premise_catch_rate_by_subtype("pre_check_reliable") == 1.0)
+check("D-068: domain_gate_refused subset rate computed correctly (2/2 = 100%)", subtype_report.false_premise_catch_rate_by_subtype("domain_gate_refused") == 1.0)
 check("D-068: needs_evidence subset rate computed correctly (1/2 = 50%)", subtype_report.false_premise_catch_rate_by_subtype("needs_evidence") == 0.5)
 check("D-068: blended rate is still the plain average, unaffected by subtype logic (3/4 = 75%)", subtype_report.false_premise_catch_rate == 0.75)
 check("D-068: unknown subtype returns None, not a crash or a false zero", subtype_report.false_premise_catch_rate_by_subtype("nonexistent") is None)
@@ -255,16 +255,16 @@ check("D-068: unknown subtype returns None, not a crash or a false zero", subtyp
 # blended rate normally. ---
 mixed_report = GoldenSetReport(results=[
     GoldenSetResult(query="q1", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype=None),
-    GoldenSetResult(query="q2", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="pre_check_reliable"),
+    GoldenSetResult(query="q2", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="domain_gate_refused"),
 ])
-check("D-068: untagged entries don't get counted into a subtype bucket", len(mixed_report.by_subtype("false_premise", "pre_check_reliable")) == 1)
+check("D-068: untagged entries don't get counted into a subtype bucket", len(mixed_report.by_subtype("false_premise", "domain_gate_refused")) == 1)
 check("D-068: untagged entries still count toward the blended rate", mixed_report.false_premise_catch_rate == 1.0)
 
 # --- Test 15: format_report includes the subtype breakdown lines when
 # subtypes are present, and omits them cleanly when they aren't
 # (backward compatible with a golden set that has no subtype field). ---
 formatted_with_subtypes = format_report(subtype_report)
-check("D-068: format_report shows the pre-check-reliable subset line", "pre-check-reliable subset (n=2): 100.0%" in formatted_with_subtypes)
+check("D-068: format_report shows the domain-gate-refused subset line", "domain-gate-refused subset (n=2): 100.0%" in formatted_with_subtypes)
 check("D-068: format_report shows the needs-evidence subset line", "needs-evidence subset (n=2): 50.0%" in formatted_with_subtypes)
 
 no_subtype_report = GoldenSetReport(results=[
@@ -281,7 +281,7 @@ diag_report = GoldenSetReport(results=[
     GoldenSetResult(query="Answerable Q that got wrongly refused", category="answerable", refused=True, refusal_type="answerability", has_citations=False, has_low_confidence_caveat=False, flags=[]),
     GoldenSetResult(query="Answerable Q that worked fine", category="answerable", refused=False, refusal_type=None, has_citations=True, has_low_confidence_caveat=False, flags=[]),
     GoldenSetResult(query="False premise that slipped through", category="false_premise", refused=False, refusal_type=None, has_citations=True, has_low_confidence_caveat=False, flags=[], subtype="needs_evidence"),
-    GoldenSetResult(query="False premise correctly caught", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="pre_check_reliable"),
+    GoldenSetResult(query="False premise correctly caught", category="false_premise", refused=True, refusal_type="domain", has_citations=False, has_low_confidence_caveat=False, flags=[], subtype="domain_gate_refused"),
 ])
 check("D-069: answerable_false_positive_candidates lists exactly the wrongly-refused one", [r.query for r in diag_report.answerable_false_positive_candidates] == ["Answerable Q that got wrongly refused"])
 check("D-069: false_premise_missed_candidates lists exactly the one that slipped through", [r.query for r in diag_report.false_premise_missed_candidates] == ["False premise that slipped through"])

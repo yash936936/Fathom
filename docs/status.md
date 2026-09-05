@@ -7,6 +7,22 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 059): D-075's Finding 1 CONFIRMED directly, not
+  inferred** -- new `--debug` run with the domain-visibility patch in
+  place shows explicit `domain_ok=False` for all 4 originally-named
+  queries (JWST/Wikipedia/Australia/NASA-moon). Further correction
+  found in the same trace: Amazon/Google/Netflix were ALSO mistagged
+  (assumed `needs_evidence` since D-068, but show the identical
+  domain-refusal pattern every run, now directly confirmed too).
+  Subtype renamed `pre_check_reliable` → `domain_gate_refused`
+  (matches the confirmed mechanism instead of the wrong one D-068/
+  D-069 originally credited) across the golden set, the eval harness,
+  and its tests. New split: `domain_gate_refused` n=7 (100% every run
+  so far), `needs_evidence` n=5. New observation, not yet acted on:
+  domain_gate's own reasoning frequently answers the premise's TRUTH
+  rather than its TOPIC, a plausible unifying explanation for both
+  this and D-075 Finding 2's cross-day flips -- flagged as the next
+  thread, not investigated yet. 384/384 across all 20 test files.
 - **UPDATE (Entry 058): D-074 CONFIRMED on real hardware** -- 0.0%
   answerable false-positive rate, transistor/inflation no longer
   wrongly refused. Separately, false-premise catch rate dropped
@@ -195,6 +211,67 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 059
+**Phase:** 10, D-075's Finding 1 confirmed directly via the new debug line; further mistagging found and corrected; subtype taxonomy renamed (D-076)
+**Action taken:** user ran `golden_set_eval.py --debug` with D-075's
+domain-visibility patch active for the first time. Read the new
+`domain:` line for every query instead of assuming the prior
+hypothesis was automatically right just because it was well-argued.
+
+**D-075 Finding 1 CONFIRMED, not inferred:** `domain_ok=False` appears
+explicitly for JWST, Wikipedia, Australia, and NASA-moon-landing --
+e.g. `domain: domain_ok=False confidence=0.95 reason='The James Webb
+Space Telescope did not shut down in 2019...'`. Direct evidence, not
+process-of-elimination from a transcript's silence.
+
+**Went further instead of stopping at "confirmed":** re-read the full
+trace and found Amazon/Google/Netflix ALSO show `domain_ok=False` this
+run -- and checking back through every prior transcript pasted into
+this project, they've shown the identical "zero output after Checking
+request" pattern every single time, exactly like the 4 originally-
+credited queries. These three were mistagged `needs_evidence` since
+D-068 on an assumption ("behaves like Eiffel/Python/Nintendo") that
+was never actually true in any observed run. Retagged.
+
+**Taxonomy renamed:** `pre_check_reliable` implied a mechanism
+(agentic-only query-only pre-check) that D-075 already proved
+structurally unreachable by any of these queries. Kept the wrong name
+after confirming the real mechanism would just perpetuate the
+original mischaracterization. Renamed to `domain_gate_refused`
+everywhere it appears: `golden_set.jsonl`, `golden_set_eval.py`'s
+report labels, `test_phase10_golden_set_eval.py`'s fixtures.
+
+**New split:** `domain_gate_refused` n=7 (JWST, Wikipedia, Australia,
+NASA-moon, Amazon, Google, Netflix), `needs_evidence` n=5 (Eiffel,
+Python, Nintendo, Y2K, 10%-brain).
+
+**New observation, flagged not acted on:** domain_gate's own `reason`
+field, even on `domain_ok=True` verdicts, often answers whether the
+premise is TRUE rather than whether the topic is in-domain (e.g.
+Eiffel Tower got `domain_ok=True reason='The Eiffel Tower did not
+collapse in 1990...'`). Plausible unifying explanation for both this
+entry's findings AND D-075 Finding 2's day-to-day flips (the model
+may be applying inconsistent truth-judgment reasoning in two
+different prompts, not two unrelated issues) -- named as the most
+promising next thread, not investigated this session.
+**Decisions logged:** D-076.
+**Files touched:** `tests/eval/golden_set.jsonl` (7 entries retagged,
+38 total unchanged), `tests/eval/golden_set_eval.py`, `test_phase10_
+golden_set_eval.py`.
+**Regression status:** 384/384 across all 20 sandbox-runnable test
+files (47/47 in `test_phase10_golden_set_eval.py`, same count -- pure
+rename, no behavior change).
+**Not yet done:** the domain_gate prompt investigation flagged above.
+Also unchanged from D-075: no golden-set entries exist yet to test
+whether domain_gate over-refuses legitimate questions phrased like
+these false-premise ones.
+**Next action for next session:** either run `--debug` again to see
+if `domain_gate_refused`'s 100% holds a third time, or start reading
+`core/domain_gate.py`'s system prompt/few-shot examples directly to
+check whether it ever shows the model a false-premise-but-in-domain
+example -- if not, that's a plausible, fixable reason for the
+truth-vs-topic conflation just observed.
 
 ### Entry 058
 **Phase:** 10, D-074 confirmed on real hardware; false-premise catch-rate drop investigated thoroughly and traced to two distinct, previously-mischaracterized causes (D-075)

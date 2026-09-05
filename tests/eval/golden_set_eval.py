@@ -81,11 +81,16 @@ class GoldenSetResult:
     # judge_low_evidence_candidates() (D-060) to give the judge model
     # actual content to assess, not just the derived boolean flags.
     error: str | None = None
-    subtype: str | None = None  # per decisions.md D-068 -- optional,
+    subtype: str | None = None  # per decisions.md D-068/D-076 -- optional,
     # currently only populated for false_premise entries
-    # ("pre_check_reliable" vs "needs_evidence"), lets the report break
+    # ("domain_gate_refused" vs "needs_evidence"), lets the report break
     # a blended catch rate apart by which mechanism actually has to
     # catch it, instead of hiding that distinction behind one number.
+    # Renamed from "pre_check_reliable" in D-076 once --debug directly
+    # confirmed these entries are caught by core/domain_gate.py, not by
+    # the agentic-only query-only answerability pre-check D-068 assumed
+    # (that check is structurally unreachable from any false_premise
+    # golden-set entry -- they all route "simple"/fast-path).
 
 
 @dataclass
@@ -285,12 +290,14 @@ def format_report(golden_report: GoldenSetReport) -> str:
     fpr = golden_report.false_premise_catch_rate
     lines.append(f"  false-premise catch rate: {f'{fpr:.1%}' if fpr is not None else 'N/A'} (no formal prd.md threshold, tracked as a hallucination-adjacent signal)")
 
-    # Per decisions.md D-068: a single blended false-premise number
-    # hides that pre_check_reliable and needs_evidence are caught by
-    # two different mechanisms with very different real reliability --
-    # break it apart whenever the golden set has subtype-tagged entries.
+    # Per decisions.md D-068/D-076: a single blended false-premise
+    # number hides that domain_gate_refused and needs_evidence are
+    # caught by two different mechanisms with very different real
+    # reliability -- break it apart whenever the golden set has
+    # subtype-tagged entries. Renamed from "pre_check_reliable" in
+    # D-076 -- --debug confirmed these are caught by core/domain_gate.py.
     for subtype, label in (
-        ("pre_check_reliable", "pre-check-reliable"),
+        ("domain_gate_refused", "domain-gate-refused"),
         ("needs_evidence", "needs-evidence"),
     ):
         rate = golden_report.false_premise_catch_rate_by_subtype(subtype)
@@ -336,7 +343,7 @@ def append_to_log(golden_report: GoldenSetReport, hardware_note: str = "(unspeci
     candidates = golden_report.low_evidence_review_candidates
     subtype_lines = ""
     for subtype, label in (
-        ("pre_check_reliable", "pre-check-reliable"),
+        ("domain_gate_refused", "domain-gate-refused"),
         ("needs_evidence", "needs-evidence"),
     ):
         rate = golden_report.false_premise_catch_rate_by_subtype(subtype)
