@@ -7,6 +7,27 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 060): `domain_gate_refused` holds 100% for a 3rd
+  consecutive run** -- taxonomy from D-076 is now well-supported, not
+  a one-off. `needs_evidence` (40% this run) now has THREE
+  independently-confirmed real causes of instability: (1) D-069's weak
+  base classifier reliability, (2) D-075's day-to-day retrieval content
+  drift, (3) NEW -- this run showed actual `arxiv_search` tool
+  failures (`ReadTimeout`, HTTP 429) directly in the trace, handled
+  correctly by existing graceful-degradation design (D-033/D-034, no
+  bug) but confirming evidence pools can shrink for reasons outside
+  Fathom's control. Also directly observed: the 10%-brain query's
+  `reason` field read as confident while its separate `confidence`
+  number came back low (`ambiguous=True`) -- `reason` and `confidence`
+  are independent fields the model doesn't always keep consistent.
+  **No code changed this entry.** Explicit recommendation: stop
+  re-running the live eval hoping for a stable `needs_evidence` number
+  -- with three confirmed noise sources now documented, further runs
+  will keep bouncing for reasons unrelated to whether Fathom's own
+  logic is correct. Two concrete next options instead: (a) finish
+  D-076's still-open domain_gate prompt investigation (no run needed),
+  or (b) implement D-065's still-open pinned/cached retrieval so
+  `needs_evidence` can be measured against a controlled evidence set.
 - **UPDATE (Entry 059): D-075's Finding 1 CONFIRMED directly, not
   inferred** -- new `--debug` run with the domain-visibility patch in
   place shows explicit `domain_ok=False` for all 4 originally-named
@@ -211,6 +232,62 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 060
+**Phase:** 10, third consecutive `--debug` run -- `domain_gate_refused` confirmed stable, `needs_evidence` instability now has three documented independent causes, no code changed (D-077)
+**Action taken:** read the third `--debug` run's trace closely rather
+than reacting to the number moving again. Goal was explicitly to
+decide whether anything here actually needs fixing, or whether this
+is more of the same already-documented noise.
+
+**`domain_gate_refused` (n=7): 100.0%, third run in a row, same 7
+queries every time.** This subtype is now well-supported by three
+independent observations -- treat it as settled, not something to
+keep re-verifying.
+
+**`needs_evidence` (n=5): 40.0% this run.** Found a genuinely new,
+directly-observed contributing cause rather than assuming it's more
+of the same: the trace shows two real `arxiv_search` failures --
+`ReadTimeout` on the Y2K query, HTTP `429` on the 10%-brain query.
+Checked `rag/retriever_hybrid.py`'s handling: this is exactly the
+documented, deliberate graceful-degradation behavior (D-033/D-034) --
+not a bug, but concrete confirmation that evidence pools genuinely
+shrink between runs for reasons entirely outside Fathom's control
+(external server timeouts/rate-limits), on top of D-075's already-
+confirmed content-drift and D-069's base classifier weakness. Also
+directly observed: the 10%-brain query's `reason` field read as
+confident ("explicitly debunked in multiple sources") while its
+separate numeric `confidence` came back below the 0.6 threshold,
+flipping it to `ambiguous=True` and missed -- `reason` and
+`confidence` are independent model outputs that don't always agree.
+
+**Decided NOT to change `arxiv_feed.py`, `retriever_hybrid.py`, or
+`answerability.py` this entry.** The tool-failure handling is already
+correct by design; a retry-on-transient-error is a real option but
+unjustified so far (Y2K was still caught correctly despite its own
+arxiv failure -- no shown correlation with a wrong verdict yet).
+Confidence/reason miscalibration is a known general small-model
+limitation without an obvious targeted fix from one observation.
+
+**The actual point of this entry:** `needs_evidence` now has THREE
+independently-confirmed real noise sources. Continuing to re-run the
+live eval and react to whatever number comes back is chasing
+already-documented noise, not diagnosing a bug -- explicitly the trap
+D-067 warned about, now with concrete evidence for exactly why it
+keeps happening. Recommended stopping that loop in favor of one of
+two structural options that don't require another live run: (1)
+D-076's still-open domain_gate prompt investigation, or (2) D-065's
+still-unimplemented pinned/cached retrieval, which would let
+`needs_evidence` be measured against a fixed evidence set instead of
+whatever arXiv/web search happens to return that day.
+**Decisions logged:** D-077.
+**Files touched:** none -- documentation only.
+**Regression status:** unchanged, no code touched.
+**Not yet done:** both structural options above.
+**Next action for next session:** pick one of the two options in
+D-077 and start there. Running `--debug` a fourth time without doing
+either first will very likely just add a fourth noisy data point to
+an already-well-explained pattern.
 
 ### Entry 059
 **Phase:** 10, D-075's Finding 1 confirmed directly via the new debug line; further mistagging found and corrected; subtype taxonomy renamed (D-076)

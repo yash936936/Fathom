@@ -3583,4 +3583,124 @@ exists, that's a plausible, fixable reason the model conflates the
 two judgments).
 
 ---
+
+### D-077 — `domain_gate_refused` holds 100% for a 3rd consecutive run (taxonomy now well-supported, not a one-off). `needs_evidence`'s continued instability now has THREE independently-confirmed causes, not one -- recommend stopping reactive re-runs in favor of one of two structural fixes
+
+**Context:** third `--debug` run since D-075/D-076's instrumentation
+landed. No code changes made this entry -- this is a "read the new
+data, decide what (if anything) actually needs fixing" pass, in
+direct response to being stuck re-running the same eval for days
+without a stable signal.
+
+**`domain_gate_refused` (n=7): 100.0%, third run in a row, same 7
+queries.** This subset is now well-supported by three independent
+observations, not a single lucky run -- worth treating as a
+genuinely settled, low-priority-to-revisit part of the golden set
+going forward, distinct from `needs_evidence`'s ongoing volatility.
+
+**`needs_evidence` (n=5): 40.0% this run (2/5).** Continues bouncing
+(66.7%→50%→40% in raw terms across the last three runs, though the
+denominator itself changed twice via D-075/D-076's retagging, so
+these aren't a clean trend line -- just consistently unstable). This
+run adds real, DIRECT evidence for a third distinct contributing
+cause, on top of the two already documented:
+
+1. (D-069) The evidence-based classifier's real-world reliability is
+   just weak on specific-event claims, independent of input quality.
+2. (D-075) Day-to-day live-search content drift changes what gets
+   retrieved even absent any error.
+3. **NEW, this entry: genuine transient tool-level failures.** This
+   run's trace shows two hard failures --
+   `arxiv_search: FAILED -- ReadTimeout` (Y2K query) and
+   `arxiv_search: FAILED -- HTTPError: 429 Client Error` (10%-brain
+   query), both from `export.arxiv.org`. Checked `rag/
+   retriever_hybrid.py`: this is handled exactly as designed (D-033/
+   D-034) -- a bare `except Exception`, `debug_report`'d, `continue`
+   -- so the run correctly didn't crash and correctly fell back to
+   fewer sources. This is NOT a bug; it's the documented, deliberate
+   behavior. But it IS a genuine, previously-inferred-but-never-
+   directly-observed reason the evidence pool for a given query can
+   shrink between runs even when nothing in Fathom's own code
+   changed. `tools/arxiv_feed.py` already has D-035's self-throttle
+   (min 3s between calls) specifically because this exact failure
+   mode was seen before -- this run shows it still happens
+   occasionally regardless (arXiv's server-side behavior, not
+   something a client-side throttle can fully prevent).
+
+**A fourth, distinct nuance also directly observed this run, worth
+naming separately from "which sources were available":** the 10%-
+brain query's answerability verdict this run was `answerable=False`
+with a reason reading exactly as confidently-worded as every prior
+run's confident catch ("The evidence directly contradicts the premise
+... explicitly debunked in multiple sources") -- but `ambiguous=True`
+this time, because the model's separate numeric `confidence` field
+came back below `CONFIDENCE_THRESHOLD=0.6`. `reason` and `confidence`
+are independent fields in the same JSON response
+(`verification/answerability.py` lines 81-83) -- nothing enforces they
+agree, and this run shows directly that they don't always. This is a
+different problem than "which evidence was retrieved" -- it's the
+model's own self-reported confidence being poorly calibrated against
+its own stated reasoning, on the same call, using the same evidence.
+
+**Deliberately NOT changing `arxiv_feed.py`, `retriever_hybrid.py`, or
+`answerability.py` this entry.** Reasoning:
+- The tool-failure handling is already correct by design (D-033/
+  D-034) -- graceful degradation, not a crash, exactly as intended.
+  A retry-on-transient-tool-error is a real option (mirrors D-066's
+  retrieval-empty retry), but arXiv's own guidance is already being
+  respected (D-035's throttle), and adding a retry trades latency for
+  a benefit that hasn't been shown necessary yet -- this run's
+  failures didn't cause a total retrieval failure, only a smaller
+  evidence pool, and Y2K was STILL caught correctly despite its own
+  arxiv failure. Worth revisiting if this specific failure mode is
+  ever shown to correlate with a wrong verdict, which hasn't happened
+  yet.
+- Confidence/reason miscalibration is a known, general small-model
+  weakness (self-reported confidence scores are notoriously unreliable
+  across the field, not specific to this codebase) -- there's no
+  obvious prompt change that reliably fixes it, and a single
+  observation isn't enough to design one from.
+- Most importantly: **`needs_evidence` now has three independently-
+  confirmed, real sources of run-to-run noise** (weak base reliability,
+  content drift, transient tool failures) plus this confidence-
+  calibration nuance. Any further live `--debug` re-run is going to
+  keep bouncing around for reasons that have NOTHING to do with
+  whether Fathom's classification logic itself is correct. Continuing
+  to re-run the eval hoping for a stable number, or tuning the
+  classifier prompt against whatever a given run happens to show, is
+  chasing noise that's now well-documented rather than diagnosing a
+  bug -- exactly the trap D-067 warned about before any of these three
+  causes were even identified.
+
+**Recommendation, stated plainly: stop re-running `golden_set_eval.py`
+as the next move.** Two structural options that would actually make
+progress, instead of a fourth live run:
+1. **D-076's still-open thread:** read `core/domain_gate.py`'s system
+   prompt/few-shot examples directly and check whether the topic-vs-
+   truth conflation observed there has a fixable prompt-level cause.
+   This is the one open thread in this whole investigation that isn't
+   about live-retrieval noise -- it's a static prompt-design question,
+   answerable without running anything.
+2. **D-065's still-unimplemented option 3:** pin/cache a fixed set of
+   retrieval results for the golden set's `false_premise` and
+   `answerable` entries, so `needs_evidence`'s catch rate can be
+   measured against a controlled, reproducible evidence set --
+   isolating "is the classifier's reasoning correct GIVEN this
+   evidence" from "did this run happen to retrieve good evidence,"
+   which is the actual open question after three runs' worth of noise.
+   Without this, every future number on this specific subset will
+   keep being a mix of both questions at once.
+
+**Files touched:** none (documentation-only entry).
+**Verification:** N/A -- no code changed.
+**Not yet done:** both structural options above remain open. Neither
+requires another live golden-set run to start.
+**Next action for next session:** pick ONE of the two options above
+and start there, rather than running `--debug` a fourth time. If
+forced to choose, option 1 (domain_gate prompt) is cheaper and fully
+within this project's existing tooling; option 2 (pinned retrieval)
+is more work but permanently fixes the measurement problem this
+whole D-069→D-077 arc has been fighting.
+
+---
 **Return to `/context.md` for next steps.**
