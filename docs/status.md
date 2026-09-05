@@ -7,6 +7,25 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 061): D-078 -- fixed domain_gate's topic/truth
+  conflation D-076 identified.** Its prompt only ever said "decide if
+  this is a genuine research question" with zero examples separating
+  task-type from premise-truthfulness -- confirmed as the actual gap
+  by reading the prompt directly, not another live run. Added explicit
+  scope language ("TASK TYPE only, never whether the premise is true")
+  and one new false-premise-but-in-domain example (deliberately NOT
+  copied from the golden set, to test generalization not
+  memorization). **Explicit, stated-up-front trade-off: this will
+  likely LOWER the measured false-premise catch rate**, since
+  `domain_gate_refused`'s 7 queries were being caught 100% of the time
+  across 3 runs by a mechanism never meant to do that job -- correcting
+  it pushes those 7 onto the fast path's already-weak evidence-based
+  check (D-069/D-077). Made the change anyway: an accidentally-right
+  number hiding a real weakness is worse than an honest lower one.
+  386/386 across all 20 sandbox-runnable test files. **NOT yet
+  confirmed on real hardware** -- next run should show `domain_ok=True`
+  for the 7 previously-refused queries; a lower aggregate number is
+  expected and is not itself evidence of a problem.
 - **UPDATE (Entry 060): `domain_gate_refused` holds 100% for a 3rd
   consecutive run** -- taxonomy from D-076 is now well-supported, not
   a one-off. `needs_evidence` (40% this run) now has THREE
@@ -232,6 +251,56 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 061
+**Phase:** 10, D-077's option 1 completed -- domain_gate topic/truth conflation fixed, explicit trade-off documented up front (D-078)
+**Action taken:** followed D-077's recommendation directly instead of
+running the eval a fourth time -- read `core/domain_gate.py`'s system
+prompt and few-shot examples in full.
+
+**Confirmed the gap D-076 predicted, from the prompt text itself:**
+the classifier's job description is purely task-type ("genuine
+research/knowledge/trend question" vs. code/creative/roleplay/
+injection). Every few-shot example is either a neutral true-premise
+research question or an unrelated task-type mismatch -- none show a
+false-premise question that should still count as in-domain. The word
+"genuine" is never disambiguated between "the right kind of task" and
+"sincere and factually grounded," so a model generalizing on its own
+predictably picked up the second reading some of the time.
+
+**Fix:** added explicit scope language (task type only, truthfulness
+never lowers `in_domain`/`confidence`) plus one new false-premise
+in_domain=true example, deliberately invented rather than lifted from
+`golden_set.jsonl` (fixing memorization of the eval set is not the
+goal; fixing the generalized reasoning is).
+
+**Trade-off stated up front, not discovered after the fact:** this
+will likely LOWER the measured false-premise catch rate. The 7
+`domain_gate_refused` queries were being caught 100% of the time
+across 3 runs by a classifier that was never supposed to be doing this
+job -- correcting its scope pushes those 7 back onto the fast path's
+evidence-based check, which is independently known to be unreliable
+(D-069/D-077). Chose correctness over the number: an artificially
+good score propped up by an unintended mechanism was hiding the real
+open problem (the evidence-based check itself) rather than fixing it.
+**Decisions logged:** D-078.
+**Files touched:** `src/core/domain_gate.py` (prompt rewrite +
+rationale comment), `test_phase2_manual.py` (+2 checks guarding the
+new prompt content stays present).
+**Regression status:** 386/386 across all 20 sandbox-runnable test
+files (19/19 in `test_phase2_manual.py`, up from 17/17). No existing
+test depended on the old prompt's exact wording.
+**Not yet done:** real-hardware confirmation -- this is a prompt-only
+change to a classifier already known to be wording-sensitive; needs a
+real run before trusting it.
+**Next action for next session:** run `golden_set_eval.py --debug`
+once. Check specifically whether `domain_ok=True` now appears for the
+7 previously-refused queries (the actual test of this fix) --
+independent of what the aggregate false-premise number does. A drop
+in that aggregate number is the expected, correct outcome here, not a
+regression. D-077's option 2 (pinned/cached retrieval) remains open
+and is still the right next investment regardless of this run's
+outcome.
 
 ### Entry 060
 **Phase:** 10, third consecutive `--debug` run -- `domain_gate_refused` confirmed stable, `needs_evidence` instability now has three documented independent causes, no code changed (D-077)

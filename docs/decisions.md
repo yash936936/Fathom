@@ -3703,4 +3703,99 @@ is more work but permanently fixes the measurement problem this
 whole D-069→D-077 arc has been fighting.
 
 ---
+
+### D-078 — Fixed the domain_gate topic/truth conflation D-076 identified. Explicit trade-off, stated up front: this will very likely LOWER the measured false-premise catch rate, and that's the correct, more honest outcome
+
+**Context:** picked up D-077's option 1 (the cheaper, no-run-needed
+thread) -- read `core/domain_gate.py`'s system prompt directly rather
+than running the eval a fourth time.
+
+**Confirmed the exact gap D-076 predicted:** the prompt's job
+description is "decide whether a user message is a genuine research/
+knowledge/trend question" -- purely a task-type judgment (research
+question vs. code/creative/roleplay/injection). Its few-shot examples
+are ALL true-premise, neutral research questions on the in_domain=true
+side, and ALL task-type mismatches (not truthfulness issues) on the
+in_domain=false side. Nothing in the prompt tells the model that a
+question's factual premise is out of scope for this decision, and
+there is no example anywhere showing a false-premise question that
+should still be in_domain=true. Given "genuine" is ambiguous between
+"the right kind of task" and "sincere and factually grounded," and the
+model is never shown which reading is intended, it's an unsurprising
+generalization gap -- not a wild guess, a predictable consequence of
+the prompt as written.
+
+**Fix:** added an explicit paragraph stating this is a TASK TYPE
+judgment only, that a false/debunked premise does NOT make something
+in_domain=false, and that any truth-judgment the model wants to make
+belongs in the `reason` field's wording at most, never in `in_domain`
+or `confidence`. Added one concrete few-shot example: "why did the
+Great Wall of China collapse in 2015?" tagged in_domain=true with a
+reason explaining it's a factual/historical question even though the
+event didn't happen. Deliberately NOT copied from `golden_set.jsonl`
+(no Eiffel Tower, no JWST, no Y2K) -- an example lifted straight from
+the eval set would tell us this fixes memorization of that exact
+query, not a generalized scope correction, and the whole point is to
+fix the underlying reasoning, not the golden set's specific score.
+
+**The trade-off, stated plainly instead of discovered the hard way:**
+this is very likely to LOWER the golden set's measured false-premise
+catch rate, not raise it, in the near term. `domain_gate_refused`'s
+7 queries were being caught with 100% reliability across 3 consecutive
+runs (D-075/D-076/D-077) -- but for the wrong reason, by a mechanism
+never intended to do this job. Correcting the prompt's scope means
+those 7 queries should now (correctly) reach `domain_ok=True`, falling
+through to the fast path's evidence-based answerability check --
+which D-069/D-077 already found catches only ~40-75% of what reaches
+it, and unreliably at that (three independently-confirmed noise
+sources, per D-077). Making this change anyway, deliberately: an
+80%-confident-looking number produced by a domain classifier
+secretly moonlighting as a fact-checker, for reasons that only work on
+extremely famous, canonical conspiracy theories and may not generalize
+to any other false premise, is a worse foundation than an honest,
+lower number that actually reflects what the evidence-based check can
+do on its own. Papering over that with an accidentally-reliable side
+effect would have meant the real weakness (the evidence-based check's
+reliability, D-069/D-077's still-open problem) stayed hidden behind a
+number that looked fine.
+
+**What to expect on the next run, so a lower score isn't mistaken for
+a regression:** `false_premise` queries should now show
+`domain_ok=True` for JWST/Wikipedia/Australia/NASA-moon/Amazon/Google/
+Netflix too (previously always `False`) -- if that happens, this fix
+is working as intended, EVEN IF the overall false-premise catch rate
+drops, because those 7 queries now depend entirely on whether the
+evidence-based check independently catches them. If the aggregate
+number goes down, that is not this fix breaking something -- it's
+this fix removing a number that was already wrong for the right
+reasons to look right.
+
+**Files touched:** `src/core/domain_gate.py` (`_SYSTEM_PROMPT`
+rewritten with scope clarification + one new example, rationale
+comment above it), `test_phase2_manual.py` (+2 checks guarding the new
+prompt content is present -- cannot verify real model behavior without
+a live model, only that the instruction exists).
+**Verification:** 19/19 in `test_phase2_manual.py` (up from 17/17),
+386/386 across all 20 sandbox-runnable test files. No test asserted on
+the old prompt's exact wording, so nothing broke from the rewrite
+itself; the new checks are additive guards against silently reverting
+this fix later.
+**Not yet done:** real-hardware confirmation. This is a prompt-only
+change to a classifier this project has already established is
+sensitive to exact wording (D-009 and others) -- it needs a real run
+before trusting it, same as every other fix in this arc.
+**Next action for next session:** run `golden_set_eval.py --debug`
+once. Check the `domain:` line for the 7 previously-domain-refused
+queries specifically -- confirm `domain_ok=True` now appears for them
+(the actual test of whether this fix worked), independent of whatever
+the aggregate false-premise number does. If any of the 7 STILL show
+`domain_ok=False`, that's a real signal the prompt fix wasn't enough
+for that specific query and needs a closer look, not evidence the
+whole approach is wrong. Separately, D-077's option 2 (pinned/cached
+retrieval) remains open and would still be the right next investment
+regardless of how this run goes, to finally separate "is the
+evidence-based classifier's reasoning correct" from "did this run
+happen to retrieve good evidence."
+
+---
 **Return to `/context.md` for next steps.**

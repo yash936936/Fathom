@@ -98,6 +98,27 @@ check(
     state["domain_reason"] == "borderline",
 )
 
+# --- D-078: real --debug traces showed this classifier's own prompt
+# never scoped out premise-truthfulness, so a small model naturally
+# folded "is this premise true" into "is this in-domain," refusing
+# several false-premise queries for the wrong reason instead of letting
+# them reach the answerability check they were meant for. Guard the
+# actual prompt content so a future edit can't silently drop this scope
+# clarification -- this can't verify the model's real behavior (no live
+# model here), only that the instruction is actually present. ---
+from core.domain_gate import _SYSTEM_PROMPT  # noqa: E402 -- see module docstring re: sandbox model access
+
+check(
+    "D-078: system prompt explicitly scopes out premise truthfulness",
+    "TASK TYPE only" in _SYSTEM_PROMPT
+    and "never whether the question's" in _SYSTEM_PROMPT,
+)
+check(
+    "D-078: system prompt gives a concrete false-premise in_domain=true example",
+    "in_domain=true" in _SYSTEM_PROMPT.split("Examples of in_domain=false")[0]
+    and "false premise" in _SYSTEM_PROMPT,
+)
+
 # --- Test 6: garbage model output -> fails open to ambiguous, flagged ---
 model = StubModel("I don't understand the request.")
 state = new_state("some query")
