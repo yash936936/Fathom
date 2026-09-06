@@ -88,7 +88,16 @@ fathom/
 ├── tests/
 │   ├── eval/
 │   │   └── golden_set.jsonl       # offline eval queries + expected criteria
-│   └── unit/                      # per-module tests, mirrors src/ structure
+│   ├── unit/                      # automated test_*.py files (per dev phase,
+│   │                               # not 1:1 with src/'s package structure --
+│   │                               # several files cover cross-cutting
+│   │                               # concerns spanning multiple modules,
+│   │                               # e.g. test_phase5_graph.py exercises the
+│   │                               # whole agentic graph, not one file)
+│   └── manual/                    # verify_*.py -- require a real machine
+│                                   # (network access, a real downloaded
+│                                   # model) to run; not part of the
+│                                   # automated suite, no CI equivalent
 │
 └── requirements.txt
 ```

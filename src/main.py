@@ -52,6 +52,20 @@ from verification.answerability import check_answerability, refusal_message
 QUICK_MODE_MAX_TOKENS = 120  # tight cap -- see module docstring on why
 DEEP_MODE_MAX_TOKENS = 512
 
+# Per decisions.md D-082: this was previously an inline string literal
+# duplicated nowhere else, unlike REFUSAL_MESSAGE (core/domain_gate.py)
+# which golden_set_eval.py already imports as its single source of
+# truth. tests/eval/golden_set_eval.py's _classify_result() had no way
+# to recognize an input_rail refusal as "refused" at all -- a query
+# input_rail correctly blocked was being scored as a failure, dragging
+# down the one formally-thresholded golden-set metric (off-domain
+# refusal rate, prd.md §5 >=95%) over an eval-harness gap, not an
+# actual runtime problem. Named here so it can be imported instead of
+# duplicated, the same way REFUSAL_MESSAGE already is.
+INPUT_RAIL_REFUSAL_MESSAGE = (
+    "This request was flagged by input safety checks and can't be processed."
+)
+
 
 def _ensure_model_available() -> None:
     """Phase 9 (appflow.md §1, decisions.md D-055/D-056): if the
@@ -222,7 +236,7 @@ def run_query(
     input_result = input_rail(query)
     if not input_result.passed:
         return (
-            "This request was flagged by input safety checks and can't be processed.",
+            INPUT_RAIL_REFUSAL_MESSAGE,
             "",
             input_result.flags,
             False,

@@ -12,7 +12,10 @@ and Phase 3 can be marked complete (or debugged if something's broken).
 """
 
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]  # tests/unit|manual/<file>.py -> repo root
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from tools import web_search, arxiv_feed, news_feed
 from rag.retriever_hybrid import retrieve

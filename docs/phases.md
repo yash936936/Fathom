@@ -115,16 +115,54 @@ Instruct GGUF), not Qwen3-4B judging itself and not a hosted API — see
 `decisions.md` D-049.
 **Exit criteria:** metrics logged in `status.md`; `readme.md` finalized;
 tag v1.0.
-**Status (D-059):** `golden_set.jsonl` built (32 entries — a starting
-set, not yet the full 50-100) and `golden_set_eval.py`, scoped to the
-two `prd.md` §5 criteria nothing previously measured (off-domain
-refusal rate, zero-silent-hallucination via an honest proxy check).
-Citation accuracy already covered by Phase 6's tooling, not
-duplicated. **Not yet done:** no real run; `tests/unit/*` (the
-existing 19-file test suite is still scattered at repo root, not
-reorganized into this structure — deferred as a separate, careful pass
-given the real risk of breaking `sys.path` assumptions across every
-existing test file); `readme.md` finalization; v1.0 tag.
+**Status (D-080/D-081, current as of Entry 063):** macOS and Linux
+work is explicitly ON HOLD pending further discussion (user's
+decision) -- Phase 8/9's status for those two OSes is unchanged from
+D-053/D-054/D-057/D-058 and not being pursued further right now. This
+phase's remaining v1 work is scoped to Windows plus everything below
+that isn't OS-specific.
+
+`golden_set.jsonl` grown 38 → 50 entries (per user's explicit target):
+15 false_premise, 14 answerable, 13 off_domain, 8 low_evidence. The 12
+new entries deliberately avoid duplicating any existing query's topic.
+New `false_premise` entries were NOT pre-assigned a `domain_gate_
+refused`/`needs_evidence` subtype -- per this project's own established
+practice (D-068), subtype is assigned from observed behavior on a real
+run, not guessed in advance; they'll be tagged after the next
+`golden_set_eval.py` run shows which mechanism actually catches each
+one.
+
+`tests/unit/*` reorganization DONE: all 20 `test_*.py` files moved from
+repo root into `tests/unit/`, all 2 `verify_*.py` (manual, real-
+hardware-only scripts, never part of the automated suite) moved into a
+new `tests/manual/` (not previously planned as a separate directory,
+added because lumping manual-only scripts in with the automated suite
+would misrepresent what `tests/unit/` actually contains). The
+"sys.path risk" this reorg was deferred over for several sessions is
+now actually fixed, not just relocated: every file's `sys.path.insert`
+was rewritten from a bare relative `"src"` (correct only when CWD
+happens to be the repo root) to a path computed from the file's own
+location via `Path(__file__).resolve().parents[2]` -- correct
+regardless of invocation CWD. Verified directly, not assumed: ran a
+moved file from inside `tests/unit/` itself, and via a full absolute
+path from an entirely unrelated directory -- both passed, proving the
+CWD-fragility is actually gone, not merely relocated to a new default
+directory. All 386 checks across all 20 files still pass post-move.
+`architecture.md`'s repo-tree diagram (which had already described
+`tests/unit/` as the target, unimplemented until now) is corrected to
+add `tests/manual/` and to stop claiming these files "mirror src/
+structure," which was never true of phase-based test files and would
+have been a misleading target to aim a future reorg at.
+
+**Still not done, unchanged:** `readme.md` finalization (still says
+"This version works on Windows only" -- accurate enough now that
+macOS/Linux are explicitly on hold, but "accurate by accident" isn't
+the same as "finalized"; needs a deliberate pass) and the v1.0 tag
+itself. D-077's pinned/cached retrieval option remains open, is not a
+blocking exit criterion (`prd.md` §5 has no formal threshold on
+`needs_evidence`'s catch rate), and is the natural next real-hardware
+step whenever `golden_set_eval.py` is run again against the new
+50-entry set.
 
 ## v2 (not started until v1 ships and is stable)
 Long-term memory, smart routing/fallback across hosted models, multi-agent

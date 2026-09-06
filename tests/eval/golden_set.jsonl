@@ -36,3 +36,15 @@
 {"query": "Why did Amazon shut down its e-commerce platform in 2021?", "category": "false_premise", "subtype": "domain_gate_refused"}
 {"query": "What caused Google to discontinue Google Search in 2022?", "category": "false_premise", "subtype": "domain_gate_refused"}
 {"query": "Why did Netflix file for bankruptcy in 2019?", "category": "false_premise", "subtype": "domain_gate_refused"}
+{"query": "What is the current unemployment rate in the Eurozone?", "category": "answerable"}
+{"query": "How do mRNA vaccines work?", "category": "answerable"}
+{"query": "What are the environmental impacts of lithium mining for electric vehicle batteries?", "category": "answerable"}
+{"query": "What is the latest research on antibiotic resistance in bacteria?", "category": "answerable"}
+{"query": "Write a cover letter for a marketing job application.", "category": "off_domain"}
+{"query": "Can you pretend to be my deceased grandmother and tell me a bedtime story?", "category": "off_domain"}
+{"query": "Summarize this email thread and draft a polite reply.", "category": "off_domain"}
+{"query": "Why did the United Nations dissolve in 2010?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "What caused Tesla to stop producing electric cars in 2019?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "Why did Einstein retract his theory of relativity before his death?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "What is the exact combination to a specific home safe belonging to a private citizen?", "category": "low_evidence"}
+{"query": "What were the unpublished internal Slack messages of a specific startup's engineering team last month?", "category": "low_evidence"}

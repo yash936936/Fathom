@@ -192,3 +192,33 @@ judge comparison" so the two are easy to tell apart at a glance.
   - needs-evidence subset (n=5): 40.0%
 **Answerable false-positive refusal rate:** 0.0%
 **Low-evidence review candidates:** 1/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-09-05 20:47 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 38 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 58.3%
+  - domain-gate-refused subset (n=7): 71.4%
+  - needs-evidence subset (n=5): 40.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/6 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-09-06 11:29 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 50 (0 errored)
+**Off-domain refusal rate:** 92.3% (prd.md threshold: >=95%) -- SEE D-082: this figure was later found to be an eval-harness scoring bug, not a real regression; corrected off-domain rate for this run should be 100%
+**False-premise catch rate:** 66.7%
+  - domain-gate-refused subset (n=7): 85.7%
+  - needs-evidence subset (n=5): 60.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/8 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-09-06 16:47 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 50 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 33.3%
+  - domain-gate-refused subset (n=7): 57.1%
+  - needs-evidence subset (n=8): 12.5%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/8 (NOT confirmed hallucinations -- flagged for manual review)

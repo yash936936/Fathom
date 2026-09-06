@@ -1,5 +1,8 @@
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]  # tests/unit|manual/<file>.py -> repo root
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from rag.planner import plan, plan_node, PlanningError
 from rag.curator import curate

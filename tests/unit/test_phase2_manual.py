@@ -9,7 +9,10 @@ correct given a plausible model response.
 """
 
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]  # tests/unit|manual/<file>.py -> repo root
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from core.domain_gate import (
     CONFIDENCE_REFUSAL_THRESHOLD,

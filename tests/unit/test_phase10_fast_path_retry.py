@@ -14,7 +14,10 @@ own test files.
 
 import sys
 
-sys.path.insert(0, "src")
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]  # tests/unit|manual/<file>.py -> repo root
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from core.llm_backend import FathomModel  # noqa: E402
 import main as main_module  # noqa: E402
