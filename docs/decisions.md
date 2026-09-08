@@ -4075,4 +4075,112 @@ advance. `false_premise` subtype distribution is now fully tagged:
 count).
 
 ---
+
+### D-083 — D-082 CONFIRMED (off-domain refusal rate 100.0%, real hardware). Separately: false-premise catch rate collapsed to 33.3%, the worst yet -- found a real, concrete classifier issue (a token budget too tight for its own prompt's actual output) instead of writing this off as more of the same noise
+
+**Context:** user ran `golden_set_eval.py --debug` against the
+50-entry set. Off-domain refusal rate: 100.0% -- D-082's fix confirmed
+directly, exactly as predicted.
+
+**False-premise catch rate dropped to 33.3%, the lowest of any run so
+far** (prior low was 58.3%). Deliberately did NOT default to "more
+retrieval-drift noise, already documented" -- the magnitude (worse
+than anything seen across 8 prior runs) and a specific, recurring
+pattern in the trace both warranted a closer look before concluding
+that.
+
+**The pattern:** several queries this run show a fully-formed,
+confident-reading `reason` explaining why a premise is false, paired
+with `ambiguous=True` (Nintendo: *"the evidence only discusses
+potential future changes... no mention of a specific event in 2018"*;
+Einstein: *"Einstein never retracted his theory of relativity"* --
+same reason text as a PRIOR run's confident catch, now paired with low
+confidence instead). This is the third time this exact reason-vs-
+confidence mismatch has been observed (first: 10%-brain-myth, D-077).
+
+**Investigated the actual mechanics rather than re-asserting "the
+model's confidence field is just noisy" a third time.** Read
+`verification/answerability.py`'s `classify_answerability()` in full.
+Found `max_tokens=80` for this call -- and directly confirmed, from
+THIS SAME transcript, that this prompt's `"reason"` field (documented
+as a "short phrase") routinely produces 250-300+ character responses
+in practice (e.g. query 2's fusion-research reason is ~280 characters).
+At roughly 4 characters/token, that's already 60-75 tokens for
+`reason` alone, before `answerable`/`confidence`/JSON structure
+overhead -- meaning the 80-token cap was marginal-to-insufficient for
+exactly the verbose responses this model actually tends to produce,
+not a hypothetical edge case.
+
+**What this does and doesn't explain, stated precisely:** a truncated
+JSON response fails to parse, is caught by `check_answerability()`,
+and silently converted to `answerable=True, confidence=0.0, reason=""`
+-- NOT a populated reason with a low confidence number. So this
+mechanism does NOT directly explain the Nintendo/Einstein pattern
+above (both have full, non-empty reason text, meaning their JSON
+parsed successfully and was never truncated). It DOES plausibly
+explain a different, adjacent symptom also visible in this run:
+several `answerable`-category queries show `reason=''` alongside
+`ambiguous=True` (e.g. query 9's ISS status, query 10's
+superconductors) -- which could be either the SCHEMA'S OWN documented
+behavior (empty reason is explicitly correct when `answerable=true`)
+or a silent truncation fallback landing on the exact same shape by
+coincidence. **These two cases were indistinguishable in the OLD debug
+output**, because `confidence` itself was never printed -- a genuine
+observability gap, not just an inconvenience, since it's the one field
+that would immediately tell them apart (a real low-but-nonzero
+confidence vs. exactly 0.0 from the fallback).
+
+**Fixed, cautiously, without over-claiming a full explanation:**
+1. Added `confidence` to BOTH answerability debug lines that were
+   missing it (`main.py`'s fast-path check, `rag/graph.py`'s
+   post-retrieval re-check) -- so the next run can directly distinguish
+   a genuine low-confidence verdict from a parse-failure fallback,
+   instead of guessing from the reason field's presence/absence.
+2. Also added debug visibility to the agentic path's PRE-retrieval
+   query-only check (`rag/graph.py`'s `answerability_pre_node`), which
+   had ZERO debug output at all before this -- the same kind of gap
+   D-075 already closed for domain_gate, just never done for this
+   specific check.
+3. Raised `max_tokens` 80 -> 150 for real headroom against the longest
+   reason text actually observed, mirroring D-070's exact reasoning
+   (that entry raised `_format_evidence`'s char limit for the same
+   underlying reason: a budget that was too tight for what the model
+   actually needed to do the job, discovered via real transcripts, not
+   guessed in advance).
+
+**Explicitly NOT done:** did not touch `CONFIDENCE_THRESHOLD` or
+attempt to fix the reason-vs-confidence calibration mismatch itself.
+That's a real, now three-times-observed phenomenon, but "the model's
+self-reported confidence doesn't track its own stated reasoning" is a
+harder, more speculative problem than a token-budget fix, and
+attempting a prompt-level fix for it now -- without first seeing
+whether raising `max_tokens` and confidence visibility changes the
+picture at all -- would be exactly the kind of guess-and-tune-against-
+one-run's-noise this project has already had to walk back multiple
+times (D-069, D-070's own history).
+
+**Files touched:** `src/main.py`, `src/rag/graph.py` (both debug
+lines gain `confidence=`, plus a new debug line on the previously-
+silent pre-retrieval check), `src/verification/answerability.py`
+(`max_tokens` 80→150), `tests/unit/test_phase6_answerability.py` (+1
+check guarding the new `max_tokens` value, `StubModel` extended to
+record it).
+**Verification:** 24/24 in `test_phase6_answerability.py` (up from
+23/23), 389/389 across all 20 files in `tests/unit/`.
+**Not yet done:** a real run to see whether the raised token budget
+and/or the new confidence visibility change anything about the
+33.3%/reason-confidence-mismatch picture. Also unchanged: the
+reason-vs-confidence calibration question itself remains open and
+deliberately untouched pending more/better data.
+**Next action for next session:** run `golden_set_eval.py --debug`
+once more. Read the new `confidence=` value directly on every
+`false_premise` query that shows `ambiguous=True` -- specifically
+check whether any of them now show exactly `0.0` (the parse-failure
+fallback signature) versus a genuine low-but-nonzero number. That
+distinction, now visible for the first time, is the actual next piece
+of evidence needed before deciding whether this is a token-budget
+problem, a genuine calibration problem, or (still, per D-077) mostly
+retrieval-content noise.
+
+---
 **Return to `/context.md` for next steps.**

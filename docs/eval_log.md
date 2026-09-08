@@ -222,3 +222,23 @@ judge comparison" so the two are easy to tell apart at a glance.
   - needs-evidence subset (n=8): 12.5%
 **Answerable false-positive refusal rate:** 0.0%
 **Low-evidence review candidates:** 0/8 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-09-07 14:17 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 50 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 66.7%
+  - domain-gate-refused subset (n=7): 71.4%
+  - needs-evidence subset (n=8): 62.5%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/8 (NOT confirmed hallucinations -- flagged for manual review)
+
+### 2026-09-08 12:42 UTC (Golden set eval, D-059, Phase 10)
+**Hardware:** (unspecified)
+**Entries run:** 50 (0 errored)
+**Off-domain refusal rate:** 100.0% (prd.md threshold: >=95%)
+**False-premise catch rate:** 60.0%
+  - domain-gate-refused subset (n=7): 71.4%
+  - needs-evidence subset (n=8): 50.0%
+**Answerable false-positive refusal rate:** 0.0%
+**Low-evidence review candidates:** 0/8 (NOT confirmed hallucinations -- flagged for manual review)

@@ -341,6 +341,7 @@ def run_query(
             if debug_report:
                 debug_report(
                     f"answerability: answerable={a_verdict.answerable} "
+                    f"confidence={a_verdict.confidence} "
                     f"ambiguous={a_verdict.ambiguous} reason={a_verdict.reason!r}"
                 )
             if a_verdict.ambiguous:

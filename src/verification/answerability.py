@@ -136,7 +136,30 @@ def classify_answerability(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=80,
+        max_tokens=150,  # per decisions.md D-083: was 80. Real transcripts
+        # (status.md Entry 065) directly show this prompt's "reason" field
+        # -- meant to be a "short phrase" -- routinely running 250-300+
+        # characters despite that instruction ("The evidence consistently
+        # discusses the current state of nuclear fusion research,
+        # including advancements, challenges, and future prospects..." is
+        # one observed example). At ~4 chars/token, that's already 60-75
+        # tokens for "reason" alone before counting "answerable"/
+        # "confidence"/JSON structure overhead -- meaning the OLD 80-token
+        # cap was marginal-to-insufficient for exactly the verbose
+        # responses this model tends to produce, risking the JSON getting
+        # cut off before its closing brace on the longer end of what's
+        # actually observed, not a hypothetical edge case. A silent
+        # truncation here raises AnswerabilityCheckError, caught by
+        # check_answerability() and converted to answerable=True,
+        # confidence=0.0, reason="", ambiguous=True -- indistinguishable
+        # in the OLD debug output from a genuine low-confidence verdict
+        # (see the new `confidence=` field added to both debug lines that
+        # consume this, in main.py and rag/graph.py, specifically to make
+        # this distinguishable going forward). 150 gives real headroom
+        # over the longest reason actually observed so far without
+        # ballooning latency on a call that D-070's docstring already
+        # notes runs on EVERY query, not just ones reaching full
+        # retrieval.
         temperature=0.0,  # deterministic classification, same rationale
         # as domain_gate.classify_domain -- do not raise without logging
         # why in decisions.md.

@@ -69,6 +69,12 @@ def build_graph(
         # than discards an already-generated answer).
         report("Checking whether the question is answerable")
         verdict = answerability.check_answerability(state["original_query"], model)
+        if debug_report:
+            debug_report(
+                f"answerability (pre): answerable={verdict.answerable} "
+                f"confidence={verdict.confidence} "
+                f"ambiguous={verdict.ambiguous} reason={verdict.reason!r}"
+            )
         if verdict.ambiguous:
             state.setdefault("guardrail_flags", []).append("answerability_ambiguous_pre")
             state["answerable"] = True
@@ -201,6 +207,7 @@ def build_graph(
         if debug_report:
             debug_report(
                 f"answerability (post): answerable={a_verdict.answerable} "
+                f"confidence={a_verdict.confidence} "
                 f"ambiguous={a_verdict.ambiguous} reason={a_verdict.reason!r}"
             )
         if a_verdict.ambiguous:

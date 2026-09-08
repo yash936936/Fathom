@@ -7,6 +7,27 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 065): D-082 CONFIRMED -- off-domain refusal rate is
+  100.0% on real hardware, exactly as predicted.** Separately,
+  false-premise catch rate dropped to 33.3% (the worst of any run so
+  far) -- investigated instead of re-labeling it as more of the
+  already-documented noise. Found a real, concrete issue: `verification/
+  answerability.py`'s classifier had `max_tokens=80`, but its own
+  `"reason"` field (meant to be a "short phrase") is directly observed
+  in this run's transcript producing 250-300+ character responses --
+  already marginal against an 80-token cap. Raised to 150 (D-070's
+  exact reasoning pattern, applied to a different call). Also closed a
+  real observability gap: `confidence` was never printed in either
+  answerability debug line, making a genuine low-confidence verdict
+  indistinguishable from a silent parse-failure fallback (both show
+  `ambiguous=True`) -- now fixed in both `main.py`'s and `rag/graph.py`'s
+  debug lines, plus added debug visibility to the agentic path's
+  pre-retrieval check, which had none at all before. Explicitly did
+  NOT touch `CONFIDENCE_THRESHOLD` or attempt a deeper calibration fix
+  -- that's a real, now 3-times-observed phenomenon (reason text reads
+  confident, confidence number is low) but deserves real data from
+  the now-visible `confidence` field before guessing at a fix. 389/389
+  across all 20 test files.
 - **UPDATE (Entry 064): the 92.3% off-domain "FAIL" (first-ever miss
   of the one formally-thresholded golden-set metric) was a real bug,
   but not the scary one it looked like.** Traced precisely: a new
@@ -306,6 +327,71 @@
   restatement.
 
 ## Log (newest first)
+
+### Entry 065
+**Phase:** 10, D-082 confirmed on real hardware; false-premise catch rate's worst-yet collapse (33.3%) traced to a real, concrete classifier issue instead of re-filed as more noise (D-083)
+**Action taken:** user ran `golden_set_eval.py --debug` against the
+50-entry set. Off-domain refusal rate: 100.0% -- D-082's fix confirmed
+directly and exactly as predicted.
+
+**False-premise catch rate collapsed to 33.3%, worse than any prior
+run (previous low: 58.3%).** Deliberately didn't default to "more
+retrieval-drift noise" given the magnitude and a specific recurring
+pattern: several queries showed a fully-formed, confident-reading
+`reason` (e.g. Nintendo: *"the evidence only discusses potential
+future changes... no mention of a specific event in 2018"*; Einstein:
+*"Einstein never retracted his theory of relativity"* -- the SAME
+reason text as a prior run's confident catch) paired with
+`ambiguous=True`. Third time this exact mismatch has shown up
+(first: 10%-brain-myth, D-077).
+
+**Read the actual classifier code instead of re-asserting "noisy
+confidence field" a third time.** Found `verification/
+answerability.py`'s `classify_answerability()` used `max_tokens=80` --
+and confirmed directly from this same run's transcript that the
+prompt's own `"reason"` field (documented as a "short phrase")
+routinely produces 250-300+ character responses in practice. At ~4
+chars/token that's already 60-75 tokens before JSON overhead --
+marginal-to-insufficient against the actual output, not a
+hypothetical risk.
+
+**Precise about what this does and doesn't explain:** a truncated
+response fails to parse and falls back to `answerable=True,
+confidence=0.0, reason=""` -- NOT a populated reason with low
+confidence, so this doesn't directly explain the Nintendo/Einstein
+pattern (both have full reason text, meaning their JSON parsed fine).
+It DOES plausibly explain a separate, adjacent symptom in the same
+run: several `answerable`-category queries show `reason=''` with
+`ambiguous=True` -- which could be the schema's own documented
+behavior (empty reason is correct when `answerable=true`) OR a silent
+truncation fallback landing on the same shape by coincidence. These
+were indistinguishable before this entry because `confidence` itself
+was never printed in the debug output.
+
+**Fixed, without over-claiming a full explanation:** (1) added
+`confidence` to both existing answerability debug lines (`main.py`
+fast path, `rag/graph.py` post-retrieval), (2) added debug visibility
+to the agentic path's pre-retrieval check, which had none at all
+before, (3) raised `max_tokens` 80→150 for real headroom, mirroring
+D-070's exact reasoning pattern for a different call.
+**Explicitly not done:** no change to `CONFIDENCE_THRESHOLD` or any
+attempt to fix the reason-vs-confidence mismatch directly -- that
+needs real data from the now-visible `confidence` field first, not
+another guess.
+**Decisions logged:** D-083.
+**Files touched:** `src/main.py`, `src/rag/graph.py`,
+`src/verification/answerability.py`, `tests/unit/
+test_phase6_answerability.py` (+1 check).
+**Regression status:** 389/389 across all 20 files in `tests/unit/`
+(24/24 in `test_phase6_answerability.py`, up from 23/23).
+**Not yet done:** a real run to see whether the raised token budget
+and/or new confidence visibility change the picture. The reason-vs-
+confidence calibration question itself remains open.
+**Next action for next session:** run `golden_set_eval.py --debug`
+again. Read the new `confidence=` value directly on every
+`ambiguous=True` false_premise result -- specifically check for
+exactly `0.0` (parse-failure signature) versus a genuine low nonzero
+number. That distinction is the actual next piece of evidence needed.
 
 ### Entry 064
 **Phase:** 10, off-domain refusal rate's first-ever "FAIL" traced and fixed -- a real eval-harness bug, not a real safety regression (D-082)

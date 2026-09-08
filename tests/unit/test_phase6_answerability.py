@@ -25,10 +25,12 @@ class StubModel:
         self.scripted_reply = scripted_reply
         self.call_count = 0
         self.last_messages = None
+        self.last_max_tokens = None
 
     def chat(self, messages, max_tokens=200, temperature=0.0, stop=None, on_token=None):
         self.call_count += 1
         self.last_messages = messages
+        self.last_max_tokens = max_tokens
         return self.scripted_reply
 
 
@@ -151,6 +153,20 @@ chunk13: RetrievedChunk = {
 formatted13 = _format_evidence([chunk13])
 check("D-070: evidence formatting now includes MORE than the old 200-char limit", len(formatted13) > 200 + len("- Test Source: "))
 check("D-070: evidence formatting is truncated at exactly 500 chars, not left unbounded", "X" * 500 in formatted13 and "X" * 501 not in formatted13)
+
+# --- Test 14 (D-083): max_tokens for this classifier call was raised
+# 80 -> 150. Real-hardware transcripts (status.md Entry 065) showed
+# this prompt's "reason" field -- meant to be a "short phrase" -- often
+# runs 250-300+ characters despite that instruction, which at ~4
+# chars/token was already marginal against the OLD 80-token cap,
+# risking a truncated, unparseable JSON response on the verbose end of
+# what the model actually produces. Guard the actual value passed to
+# model.chat(), not just the prompt text, so a future "let's tidy this
+# up" edit can't silently drop the headroom without noticing why it
+# was added. ---
+model14 = StubModel('{"answerable": false, "confidence": 0.8, "reason": "test"}')
+check_answerability("Did X happen?", model14)
+check("D-083: max_tokens raised from 80 to 150 for headroom against long reason text", model14.last_max_tokens == 150)
 
 print()
 n_pass = sum(1 for _, ok in results if ok)
