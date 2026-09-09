@@ -4183,4 +4183,212 @@ problem, a genuine calibration problem, or (still, per D-077) mostly
 retrieval-content noise.
 
 ---
+
+### D-084 — D-083's parse-failure hypothesis RULED OUT by direct evidence in the real run it asked for. The confidence=0.0 pattern is a genuine, valid model output, not a truncation fallback -- and it is cleanly bimodal (~0.9+ or exactly 0.0), not noisy
+
+**Context:** user ran `golden_set_eval.py --debug` (the exact next step
+D-083 asked for) against the 50-entry set with `confidence=` now
+visible in both debug lines. Off-domain refusal rate 100.0% (D-082
+still holds). False-premise catch rate: 60.0% (n=15; domain-gate-
+refused subset 71.4% of 7, needs-evidence subset 50.0% of 8) -- middle
+of the range seen across all prior runs (33.3%-91.7%), not a new
+extreme in either direction.
+
+**The specific question D-083 left open: for the 6 missed false-premise
+queries this run (Wikipedia, Python-discontinued, 10%-brain,
+Amazon, UN-dissolved, Tesla), is `confidence=0.0` a genuine low-
+confidence verdict or the parse-failure fallback signature?**
+
+Checked directly against this run's own transcript, field by field,
+against what `check_answerability()`'s fallback actually returns on a
+parse failure (`answerable=True, confidence=0.0, reason=""`,
+confirmed by re-reading the function this session):
+
+All 6 misses show `answerable=False` (not `True`) and a full,
+specific, correct `reason` string (e.g. Wikipedia: `"Wikipedia did not
+shut down permanently in 2015"`; Tesla: `"...Tesla discontinued
+specific models (Model S and X)...there is no evidence of a general
+halt..."`). **Both fields directly contradict the fallback's shape.**
+This can only mean the JSON parsed successfully and the model itself
+wrote `"confidence": 0.0` as a valid, deliberate value alongside a
+fully-reasoned, correct, confident-reading verdict. D-083's parse-
+failure/token-budget hypothesis is therefore ruled out as the
+explanation for these 6 cases specifically -- the max_tokens 80->150
+fix may still be worth keeping (headroom is still headroom), but it is
+not, and was never going to be, a fix for this pattern.
+
+**New finding, not previously stated this precisely:** confidence
+values across all 15 false-premise queries this run are cleanly
+bimodal, not continuously noisy:
+- Caught (ambiguous=False) queries: 0.7-0.95 (Eiffel 0.95, JWST 0.95,
+  Australia 0.9, Nintendo 0.7, Y2K 0.95, Netflix 0.95, Einstein 0.95).
+- Missed (ambiguous=True) queries: exactly 0.0 in all 6 cases.
+
+Zero queries landed anywhere in between. A model genuinely unsure
+between two readings would be expected to occasionally produce
+intermediate values (0.3, 0.5, 0.55) -- seeing none across 13
+observations, with the miss set landing on the exact same value every
+time, points toward a systematic prompt/semantics issue rather than
+sampling noise: `_SYSTEM_PROMPT_WITH_EVIDENCE`'s schema line
+(`"confidence": a number from 0.0 to 1.0`) never states what the
+number is confidence IN. One plausible reading the model may be
+applying inconsistently: confidence-in-the-answerable-value-as-stated
+(correct, intended reading -- produces high numbers for confident
+"false" verdicts, matches the caught set) versus confidence encoded as
+"how true is the premise" (produces near-0 for a confidently-false
+premise, matches the missed set exactly). This is a hypothesis, stated
+as one -- not confirmed by re-prompting or an ablation this session,
+consistent with this project's own standing practice (D-069/D-070) of
+not guessing a fix from one run's pattern alone, even a clean one.
+
+**Explicitly not done:** no prompt change, no `CONFIDENCE_THRESHOLD`
+change. The obvious next diagnostic (not yet run): add an explicit
+sentence to `_SYSTEM_PROMPT_WITH_EVIDENCE` clarifying "confidence = how
+sure you are that your `answerable` value above is correct" and see
+whether the 6 missed queries' confidence values move off exactly 0.0
+-- this would directly confirm or kill the semantics-ambiguity
+hypothesis, unlike another plain re-run of the same prompt.
+
+**Files touched:** none (analysis-only session against an existing
+real-hardware run's transcript; no code changed).
+**Verification:** re-ran all 20 `tests/unit/test_*.py` files standalone
+in sandbox (this environment can't run the real model, same limitation
+as every prior sandbox session) -- 389/389, unchanged from D-083,
+confirming no regression from D-083's landed changes.
+**Separately found this session, not related to D-084's main finding:**
+the `v1.0-windows` git tag (commit `8673354`) is 13 commits behind
+`HEAD` -- it predates B-022 (the fast-path empty-retrieval retry fix,
+status.md's own Entry 049/050 calls this "the DOMINANT cause" of the
+false-premise/answerable-refusal swings) and everything from D-067
+through D-083. The tag does not currently point at a commit that
+reflects any of this session's or the last dozen sessions' fixes.
+Flagging for the user's decision rather than moving the tag
+unilaterally -- see status.md Entry 066.
+**Next action for next session:** either (a) run the confidence-
+semantics diagnostic proposed above, or (b) decide the `v1.0-windows`
+tag question (re-tag at current HEAD once Phase 10 exit criteria are
+otherwise met, or leave the existing tag as a historical marker and
+plan a `v1.1`/`v1.0.1` tag instead) -- both genuinely need the user's
+input, not a unilateral pick.
+
+### D-085 — Implemented D-084's proposed diagnostic: clarified what `confidence` means in both `answerability.py` prompts, explicitly warning against the misreading the bimodal 0.0/0.9+ split pointed to
+
+**Context:** user asked to act on D-084's open item. `_SYSTEM_PROMPT_
+WITH_EVIDENCE`'s and `_SYSTEM_PROMPT_QUERY_ONLY`'s shared JSON schema
+line (`"confidence": a number from 0.0 to 1.0`) never stated what the
+number was confidence IN -- the two plausible readings ("how sure are
+you the `answerable` value is correct" vs. "how likely is the premise
+true") happen to coincide for `answerable=true` verdicts but diverge
+sharply for a confidently-false one, which is exactly the case D-084
+found landing on `confidence=0.0` six times in a row.
+
+**Change:** both prompts' schema line now reads confidence as
+`"a number from 0.0 to 1.0 for how sure you are that the 'answerable'
+value above is correct (NOT how likely the question's premise is true
+-- a confident answerable=false verdict should have a HIGH confidence,
+e.g. 0.9, not a low one)"`. Applied to both prompt variants, not just
+`_SYSTEM_PROMPT_WITH_EVIDENCE` (where D-084's evidence came from) --
+they share the identical schema line, so the same ambiguity was
+present in the query-only pre-retrieval check too, untested by this
+run only because no false-premise query in the golden set currently
+takes the agentic path's pre-retrieval route with enough consistency
+to have surfaced it there yet (per D-065/D-066, most `false_premise`
+queries route fast-path).
+
+**Explicitly not done:** did not touch `CONFIDENCE_THRESHOLD` (0.6) --
+this change targets the input to that threshold, not the threshold
+itself. If the semantics fix works, the threshold may turn out to
+already be reasonable; changing both at once would make it impossible
+to tell which one moved the needle on the next run.
+
+**Files touched:** `src/verification/answerability.py` (both prompt
+constants), `tests/unit/test_phase6_answerability.py` (+3 checks:
+both prompts carry the clarification, worded distinctly enough that a
+future edit collapsing them back to the old ambiguous line would fail
+loudly, not silently).
+**Verification:** 27/27 in `test_phase6_answerability.py` (up from
+24/24), 392/392 across all 20 files in `tests/unit/` (up from
+389/389).
+**Not yet done:** a real run. This is a prompt-wording change to a
+CPU-bound local model's classifier -- it could fix the pattern, have
+no effect, or (least likely but not impossible) shift the bimodal
+split's location rather than removing it. D-084's own text already
+named this as the diagnostic that would distinguish "genuine semantics
+ambiguity" from other explanations; this entry is that diagnostic
+implemented, not yet run.
+**Next action for next session:** run `golden_set_eval.py --debug`
+again against the same 50-entry set. Specifically check whether the 6
+previously-`confidence=0.0` false-premise misses (Wikipedia, Python,
+10%-brain, Amazon, UN, Tesla) now show `confidence` values above
+`CONFIDENCE_THRESHOLD` (0.6) instead of exactly 0.0 -- if they do, this
+was the fix; if `confidence=0.0` persists on the same or different
+queries, the semantics-ambiguity hypothesis is likely wrong and the
+reason-vs-confidence mismatch needs a different explanation than D-084
+proposed.
+
+### D-086 — Added `tests/eval/watchlist_eval.py`: a fast, curated-subset re-run harness, separate from `golden_set_eval.py`'s full 50-entry run
+
+**Context:** user asked for a separate test file holding only the
+queries actually being iterated on right now, rather than re-running
+all 50 golden-set entries (slow, and mixes signal from queries
+unrelated to the current fix) every time D-085's confidence-semantics
+change needs a real-hardware check.
+
+**What was built, not modified:** `tests/eval/watchlist.jsonl` (10
+hand-picked entries, editable) and `tests/eval/watchlist_eval.py`, which
+imports and REUSES `golden_set_eval.py`'s real machinery (`load_golden_
+set`, `run_golden_set`, `format_report`) rather than duplicating any of
+it -- same real front door (`main.run_query`), same refusal-
+classification logic, so a watchlist result means the same thing a
+golden-set result does. `golden_set_eval.py` itself was not touched.
+
+**Current watchlist composition (per D-084/D-085):** the 6 false-
+premise queries that showed `confidence=0.0` alongside a fully-
+reasoned, correct verdict (Wikipedia, Python, 10%-brain, Amazon, UN,
+Tesla) -- the exact set D-085's prompt fix targets -- plus 2 false-
+premise controls that were ALREADY caught correctly (Eiffel, JWST, to
+catch a regression), 1 `answerable` control (transistor, false-positive
+guard), 1 `off_domain` control (Python-linked-list, input_rail/
+domain_gate guard).
+
+**Deliberately logs to a SEPARATE file** (`tests/eval/watchlist_log.md`,
+not `docs/eval_log.md`) -- a 10-entry run's rates are not comparable to
+the 50-entry run's rates (different n, different composition weighted
+toward exactly the cases currently being debugged), and mixing them
+into the historical trend log `prd.md` §5's threshold is tracked
+against would corrupt that record. The full `golden_set_eval.py` run
+remains the one that matters for any release/exit-criteria decision;
+this is explicitly a between-sessions diagnostic tool, stated as such
+in its own module docstring.
+
+**New discrepancy surfaced while building this, not yet resolved:**
+`golden_set.jsonl` still tags Wikipedia and Amazon `domain_gate_
+refused`, but the real transcript D-084 analyzed shows both reaching
+the evidence-based check (`domain_ok=True`) that run -- i.e. NOT
+domain-gate-refused that time. Not silently re-tagged here, per this
+project's standing practice (D-068) of tagging subtype from observed
+behavior on a real run, not guessing -- flagged in `watchlist_eval.py`'s
+own docstring so the next real run's `--debug` output can resolve it
+directly.
+
+**Files touched:** `tests/eval/watchlist.jsonl` (new),
+`tests/eval/watchlist_eval.py` (new), `tests/unit/test_watchlist_eval.py`
+(new -- 8 checks: loader compatibility, category validity, all 6 D-085
+target queries present, log-path separation from `eval_log.md`, and a
+real temp-file write/read round-trip for `append_to_watchlist_log`, not
+just an existence check).
+**Verification:** 8/8 in the new test file, 400/400 across all 21
+files in `tests/unit/` (up from 392/392 across 20).
+**Not yet done:** a real run of `watchlist_eval.py` itself -- same
+real-hardware dependency as everything else in Phase 10. This is the
+harness D-085's "next action" (re-run and check whether the 6
+`confidence=0.0` misses move) should now use instead of the full
+`golden_set_eval.py`, once real hardware is available.
+**Next action for next session:** run `python tests/eval/
+watchlist_eval.py --debug`, read the `confidence=` value on each of
+the 6 target queries directly, and separately note whether Wikipedia/
+Amazon's `domain_ok` result matches or contradicts their currently-
+stored `domain_gate_refused` subtype tag.
+
+---
 **Return to `/context.md` for next steps.**

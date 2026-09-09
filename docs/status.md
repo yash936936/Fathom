@@ -7,6 +7,70 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 068): D-086 -- built `tests/eval/watchlist_eval.py`,
+  a fast curated-subset re-run harness.** 10 hand-picked entries
+  (`watchlist.jsonl`): the 6 confidence=0.0 misses D-085 targets, 2
+  already-passing false-premise controls, 1 answerable control, 1
+  off-domain control. Reuses `golden_set_eval.py`'s real machinery
+  unmodified, logs to its own `watchlist_log.md` (never `eval_log.md`
+  -- rates aren't comparable to the full 50-entry run). Surfaced a new,
+  unresolved discrepancy: `golden_set.jsonl` tags Wikipedia/Amazon
+  `domain_gate_refused`, but D-084's transcript shows both actually
+  reaching the evidence-based check that run -- flagged, not silently
+  fixed. 400/400 across all 21 test files (up from 392/392 across 20).
+  **Not yet run for real** -- this is now the harness D-085's pending
+  real-hardware check should use.
+- **UPDATE (Entry 067): D-085 -- implemented D-084's proposed
+  diagnostic.** Clarified `confidence`'s semantics in both
+  `answerability.py` prompts (query-only and with-evidence share the
+  same schema line): now explicitly "how sure you are the answerable
+  value is correct," with an explicit warning against reading it as
+  "how likely the premise is true." Did NOT touch `CONFIDENCE_THRESHOLD`
+  -- isolating this change so the next run can tell whether the
+  semantics fix alone moves the six previously-`confidence=0.0`
+  misses, without a second variable in play. 392/392 across all 20
+  test files (up from 389/389, +3 new checks guarding both prompts
+  carry the clarification). **NOT yet confirmed on real hardware** --
+  next run is the actual test of D-084's hypothesis.
+- **v1.0-windows tag: still undecided, not re-tagged this session** --
+  user has been given both options (re-tag at HEAD vs. plan v1.1) but
+  hasn't picked yet as of this entry.
+- **UPDATE (Entry 066): D-084 -- D-083's parse-failure hypothesis
+  RULED OUT with direct evidence, replaced with a sharper, still-open
+  finding.** Analyzed the real `golden_set_eval.py --debug` run D-083
+  asked for (60.0% false-premise catch rate this run, middle of the
+  33.3%-91.7% range seen so far -- not a new extreme). All 6 misses
+  show `answerable=False` with a full, correct `reason` string, which
+  is impossible under the parse-failure fallback's actual shape
+  (`answerable=True, reason=""`, reconfirmed by re-reading
+  `check_answerability()`) -- so `confidence=0.0` in these cases is a
+  genuine, validly-parsed model output, not truncation. New precise
+  finding: confidence values across all 15 false-premise queries this
+  run are cleanly bimodal -- caught queries cluster 0.7-0.95, missed
+  queries are exactly 0.0 in all 6 cases, nothing in between. Points
+  toward `_SYSTEM_PROMPT_WITH_EVIDENCE`'s confidence field having
+  ambiguous semantics (never states confidence IN WHAT) rather than
+  sampling noise -- stated as a hypothesis, not confirmed by an
+  ablation this session. No code changed. 389/389 across all 20 test
+  files, independently re-verified in sandbox this session (standalone
+  script execution, not pytest -- see note below).
+- **Separately found this session: the `v1.0-windows` tag is stale.**
+  It points at commit `8673354`, 13 commits behind `HEAD` -- predates
+  B-022 (status.md's own Entry 049/050 call this "the DOMINANT cause"
+  of the false-premise/answerable-refusal swings) and everything from
+  D-067 through D-083. `phases.md`'s "v1.0 tag remains held" language
+  (Entry 034-era) is now stale too -- a tag WAS cut, just apparently
+  before the fixes that made the number it was tagged on trustworthy.
+  Not re-tagged unilaterally -- needs the user's call (see D-084's
+  "next action").
+- **Sandbox note:** `pytest` collection fails project-wide -- these
+  test files are standalone scripts (module-level `sys.exit(1)` on
+  failure, not `assert`-based), meant to be run individually
+  (`python tests/unit/test_X.py`), not collected by a test runner.
+  Not a new issue, just newly hit directly in this sandbox session
+  (previous sessions' 389/389 figures were presumably produced the
+  same way). Documenting here since `workflow.md`/`phases.md` don't
+  currently say how the suite is meant to be invoked.
 - **UPDATE (Entry 065): D-082 CONFIRMED -- off-domain refusal rate is
   100.0% on real hardware, exactly as predicted.** Separately,
   false-premise catch rate dropped to 33.3% (the worst of any run so

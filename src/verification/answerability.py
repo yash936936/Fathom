@@ -39,8 +39,11 @@ find -- an obscure, niche, or forward-looking question is still \
 answerable. Only flag questions whose premise itself is false.
 
 Respond with ONLY a JSON object, no other text:
-{"answerable": true or false, "confidence": a number from 0.0 to 1.0, \
-"reason": "short phrase, empty string if answerable"}
+{"answerable": true or false, "confidence": a number from 0.0 to 1.0 \
+for how sure you are that the "answerable" value above is correct \
+(NOT how likely the question's premise is true -- a confident \
+answerable=false verdict should have a HIGH confidence, e.g. 0.9, \
+not a low one), "reason": "short phrase, empty string if answerable"}
 
 Example of answerable=false: "Why did [some real organization] shut down \
 in 2019?" when it never shut down. Example of answerable=true: "What are \
@@ -70,8 +73,11 @@ this check's job, and should be answered normally or left to the \
 sufficiency check.
 
 Respond with ONLY a JSON object, no other text:
-{"answerable": true or false, "confidence": a number from 0.0 to 1.0, \
-"reason": "short phrase, empty string if answerable"}
+{"answerable": true or false, "confidence": a number from 0.0 to 1.0 \
+for how sure you are that the "answerable" value above is correct \
+(NOT how likely the question's premise is true -- a confident \
+answerable=false verdict should have a HIGH confidence, e.g. 0.9, \
+not a low one), "reason": "short phrase, empty string if answerable"}
 """
 
 

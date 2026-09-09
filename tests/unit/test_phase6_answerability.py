@@ -168,6 +168,31 @@ model14 = StubModel('{"answerable": false, "confidence": 0.8, "reason": "test"}'
 check_answerability("Did X happen?", model14)
 check("D-083: max_tokens raised from 80 to 150 for headroom against long reason text", model14.last_max_tokens == 150)
 
+# --- Test 15 (D-084/D-085): the confidence field's schema line must
+# explicitly state what confidence is IN, and explicitly warn against
+# the wrong reading. Real-hardware evidence (D-084) showed a clean
+# bimodal split -- confident answerable=false verdicts sometimes wrote
+# confidence=0.0 exactly, alongside a fully-reasoned correct answer --
+# consistent with the model reading "confidence" as "how likely the
+# premise is true" rather than "how sure are you of the verdict
+# above." Guard BOTH prompt variants (query-only and with-evidence
+# share the same JSON contract line, so both carried the same
+# ambiguity) so a future edit can't silently drop the clarification
+# from one and not the other. ---
+query_only_text = answerability_module._SYSTEM_PROMPT_QUERY_ONLY
+check(
+    "D-084/D-085: with-evidence prompt states confidence is IN the answerable verdict",
+    "how sure you are that the" in prompt_text and "answerable" in prompt_text.split("how sure you are that the")[1][:30],
+)
+check(
+    "D-084/D-085: with-evidence prompt explicitly warns against the premise-truth misreading",
+    "NOT how likely the question's premise is true" in prompt_text,
+)
+check(
+    "D-084/D-085: query-only prompt carries the same clarification (shared schema line)",
+    "how sure you are that the" in query_only_text and "NOT how likely the question's premise is true" in query_only_text,
+)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")
