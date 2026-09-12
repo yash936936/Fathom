@@ -4390,5 +4390,383 @@ the 6 target queries directly, and separately note whether Wikipedia/
 Amazon's `domain_ok` result matches or contradicts their currently-
 stored `domain_gate_refused` subtype tag.
 
+### D-087 — D-085 CONFIRMED on real hardware: all 6 targeted `confidence=0.0` misses now score 0.95-0.99. `v1.0-windows` tag re-cut at HEAD per D-084's recommendation
+
+**Context:** user ran `python tests/eval/watchlist_eval.py --debug`
+(D-086's harness) for the first time on real hardware, immediately
+after D-085's prompt fix. Same run also re-cut the `v1.0-windows` git
+tag at current HEAD (delete + re-create + force-push), per the
+recommendation logged alongside D-084.
+
+**Result: clean, unambiguous confirmation.** All 8 false-premise
+watchlist entries now score `confidence=0.95-0.99`, `ambiguous=False`
+-- including all 6 queries that previously showed the exact
+`confidence=0.0` pattern D-084 identified (Wikipedia: 0.99, Python:
+0.99, 10%-brain: 0.99, Amazon: 0.99, UN: 0.99, Tesla: 0.99). Watchlist
+false-premise catch rate: 100.0% (8/8), both subtypes 100.0%.
+Off-domain and answerable controls unaffected (100.0% / 0.0%
+false-positive, matching pre-fix behavior) -- no regression from the
+prompt change on the cases it wasn't meant to touch.
+
+**This is real, not just directionally encouraging:** zero queries
+landed at an intermediate confidence value (no 0.4, 0.5, 0.7) --
+the fix didn't just nudge the distribution, it moved every single
+previously-0.0 case to the high cluster, consistent with D-084's
+hypothesis that the ORIGINAL ambiguity (not "how confident is the
+model" but "which of two readings of the confidence field is it
+applying") was the actual mechanism, not generic small-model noise.
+
+**Explicitly NOT over-claiming from this alone:** n=8 on a hand-picked
+subset that is, by construction, weighted toward exactly the queries
+that were failing -- a clean sweep here was the expected best case if
+the hypothesis was right, and it happened. It does NOT by itself
+confirm the full golden set's false-premise catch rate will now sit
+at 100% (the 50-entry set includes 7 more false-premise queries this
+watchlist doesn't cover, plus category composition/interaction effects
+a 10-query subset can't surface), and it says nothing new about
+`needs_evidence`'s other confirmed noise sources (D-077: retrieval
+content drift, transient tool failures) -- those don't go away because
+the confidence field itself is now legible.
+
+**Tag:** `v1.0-windows` re-cut at HEAD, confirmed via the pasted
+terminal output (`Deleted tag ... (was 8673354)`, followed by a
+new annotated tag push). Now reflects B-022 through D-087, not the
+stale pre-B-022 snapshot flagged in D-084.
+
+**Files touched:** none -- confirmation entry only (real-hardware run
++ a git operation, no code change).
+**Verification:** N/A, no code changed this entry.
+**Not yet done:** the actual full `golden_set_eval.py --debug` run
+against all 50 entries -- this is the real next step before treating
+Phase 10's false-premise metric as meaningfully improved rather than
+"improved on the subset most likely to improve." Recommend running it
+before relying on the re-cut tag as representing a fully re-validated
+release; the tag currently reflects "D-085's fix is real and working
+on its target cases," not yet "the full golden-set number is
+confirmed better."
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug` against the full 50-entry set. Compare the resulting
+false-premise catch rate and its two subtype rates against the last
+full-set number on record (60.0%, 2026-09-08 12:42 UTC in `eval_log.
+md`) -- expect an improvement, but confirm the size of it, and check
+whether `needs_evidence`'s other noise sources (D-077) are still
+visible in queries the watchlist doesn't cover. Also worth resolving,
+now with real data: whether Wikipedia/Amazon should be re-tagged in
+`golden_set.jsonl` -- this run shows both with `domain_ok=True`
+(reaching the evidence-based check, not domain-gate-refused), matching
+D-084's observation and now confirmed on a SECOND real run, not just
+one -- worth actually correcting the stored `domain_gate_refused` tag
+to `needs_evidence` for both at this point rather than continuing to
+flag it as merely "unresolved."
+
+### D-088 — Retagged Wikipedia/Amazon `domain_gate_refused` -> `needs_evidence`, confirmed by TWO independent real runs, not guessed
+
+**Context:** D-087 flagged that Wikipedia and Amazon's stored
+`golden_set.jsonl` subtype (`domain_gate_refused`) no longer matched
+observed behavior -- D-084's original transcript AND D-087's watchlist
+confirmation run both showed `domain_ok=True` for both queries (i.e.
+they reach the evidence-based check, not a domain-gate refusal).
+
+**Action:** retagged both entries `needs_evidence` in
+`golden_set.jsonl` and the mirrored entries in `watchlist.jsonl`.
+Per this project's own established practice (D-068's original
+tagging rule, reaffirmed through D-075/D-076's corrections), subtype
+is assigned from OBSERVED behavior on real runs, not guessed -- two
+independent real observations agreeing is a stronger basis for this
+correction than either of the two prior retagging rounds (D-075 acted
+on one run's inference from absent output; D-076 confirmed it with one
+direct observation). This is the third round of subtype correction in
+this project's history for this exact pair of fields -- worth noting
+only because it's now happened three times, not because this instance
+is itself uncertain.
+
+**Resulting golden-set subtype split:** `needs_evidence` n=10 (up from
+8), `domain_gate_refused` n=5 (down from 7). Total `false_premise`
+count unchanged at 15; total golden-set entries unchanged at 50.
+
+**Files touched:** `tests/eval/golden_set.jsonl` (2 subtype
+corrections), `tests/eval/watchlist.jsonl` (same 2, mirrored),
+`tests/eval/watchlist_eval.py` (docstring updated from "NOTE ...not
+yet resolved" to "NOTE (RESOLVED, D-088)").
+**Verification:** JSONL re-validated well-formed (50 entries, category
+counts unchanged: 14/13/15/8). Full regression sweep: 400/400 across
+all 21 files in `tests/unit/` -- unaffected, since the only tests
+referencing these subtype labels use synthetic fixture data (`q1`,
+`q2`...), not the real golden set.
+**Not yet done:** unchanged from D-087 -- the full 50-entry
+`golden_set_eval.py` run is still the real next step. Its next
+`domain-gate-refused subset (n=...)` line will read `n=5` instead of
+`n=7` for the first time; not itself a regression, just the corrected
+denominator.
+
+### D-089 — D-085 CONFIRMED at full scale: false-premise catch rate hit 100.0% (15/15) for the first time in this project's history. A real, directly-traceable side effect also surfaced: one `answerable` query now wrongly refused where it previously (correctly) fell through to a caveated answer
+
+**Context:** user ran the full `golden_set_eval.py --debug` against
+all 50 entries, post-D-085/D-087/D-088. This is the actual "real
+hardware confirmation" D-087/D-088 both named as the outstanding next
+step.
+
+**The headline number, and why it's a stronger result than any prior
+run:** false-premise catch rate **100.0% (15/15)** -- both subtypes
+(`domain_gate_refused` n=5, `needs_evidence` n=10, post-D-088's retag)
+at 100.0%. Every prior run in this project's history, across 15+
+real-hardware attempts spanning D-065 through D-083, landed somewhere
+in 33.3%-91.7% -- this is the first time the full set has ever cleared
+92%, let alone hit a clean sweep. Off-domain refusal held at 100.0%
+(prd.md §5's one formally-thresholded criterion, unaffected). This is
+strong, not just encouraging, evidence that D-084's confidence-
+semantics hypothesis was the real, dominant mechanism behind the
+multi-week false-premise instability -- not one contributing factor
+among several, at least not for the specific 0.0-vs-0.9 pattern D-084
+identified.
+
+**A real regression also appeared, traced to the same fix, not a
+coincidence:** `answerable_false_positive_refusal_rate` rose to 7.1%
+(1/14) -- `"What are the most recent advances in room-temperature
+superconductors?"`, `refusal_type=answerability`, confidently refused
+(`confidence=0.95, ambiguous=False`).
+
+**Traced precisely, not assumed:** this exact query appeared in the
+pre-D-085 run analyzed in D-084 too. There, it scored
+`confidence=0.3, ambiguous=True` -- LOW confidence, which
+`main.py`'s fast path (`if a_verdict.ambiguous: flag and continue`)
+correctly treats as "pass through, flag, let synthesis answer with a
+caveat" rather than a hard refusal. Same query, same underlying
+uncertainty, this run: `confidence=0.95, ambiguous=False` -- the
+`elif not a_verdict.answerable:` branch fires instead, an immediate
+refusal that bypasses `output_rail` and synthesis entirely (same code
+path `check_answerability`'s docstring documents, verified directly
+against `main.py` lines ~345-361 this session).
+
+**Why this is the same fix's side effect, not an unrelated new bug:**
+D-085 didn't change WHAT the classifier decides, only how legibly it
+reports its own conviction. This query's `reason` ("no mention of
+recent advances... achieved or confirmed") is `_SYSTEM_PROMPT_WITH_
+EVIDENCE`'s criterion 2 territory -- "evidence discusses the subject in
+depth but never corroborates the specific claimed event." Criterion 2
+already carries an explicit guard (added under D-069) against firing
+on merely-thin-but-real evidence, and room-temperature superconductivity
+is exactly the kind of live, disputed, no-confirmed-breakthrough
+research frontier that guard is supposed to protect -- arguably a
+genuine near-miss of that guard's intent, not a clean case for
+criterion 2 the way a fabricated corporate bankruptcy is. Before D-085,
+this borderline classification decision likely ALSO carried the
+premise-truth/verdict-confidence semantic confusion, which happened to
+often land on a low number for exactly these hard-to-classify cases --
+so the ambiguous-fallback path was, by coincidence, catching some of
+criterion 2's real edge-case weakness and converting it into a safe
+"answer with caveat" outcome instead of a hard refusal. D-085 removed
+that noise. What's left exposed is a PRE-EXISTING criterion 2 edge
+case that the confidence bug had been accidentally masking, not a
+defect D-085 itself introduced.
+
+**Explicitly not fixed this entry, and why:** one occurrence is not
+enough to redesign criterion 2's guard clause -- this project's own
+repeated experience (D-067, D-069, D-070 all explicitly warn against
+this) is that single-run patterns on borderline evidence-classification
+prompts can be retrieval-content-drift artifacts (D-075: confirmed
+real, day-to-day) rather than a stable defect. The right next step is
+confirming whether this specific query fails the SAME way on a repeat
+run before touching the prompt a fourth time.
+
+**Net assessment, stated plainly:** a 33.3-91.7%-to-100.0% false-
+premise improvement traded against a 0%-to-7.1% (1 query)
+answerable-false-positive regression is very likely a good trade in
+aggregate -- prd.md §5 has no formal threshold on the answerable-FP
+rate (unlike off-domain refusal), and false-premise catching is the
+metric this project has spent D-065 through D-088 specifically trying
+to stabilize. Not declaring this decided, though -- flagging the
+trade-off explicitly rather than either quietly accepting it or
+reflexively reverting D-085 over one query.
+
+**Files touched:** none -- confirmation/analysis entry only.
+**Verification:** N/A, no code changed. `docs/eval_log.md` already
+carries this run's real numbers (2026-09-10 16:47 UTC entry).
+**Not yet done:** a repeat run to check whether the superconductors
+query's refusal is stable or a one-off (per D-075's confirmed
+retrieval-drift pattern). If it recurs, the concrete next step is
+adding an explicit "actively-researched but unconfirmed/disputed
+frontier" exception to criterion 2's guard clause, mirroring how
+`_SYSTEM_PROMPT_QUERY_ONLY` already protects "obscure, niche, or
+forward-looking questions" -- not touching `CONFIDENCE_THRESHOLD`,
+which isn't what's driving this case (0.95 is nowhere near the 0.6
+boundary).
+**Next action for next session:** re-run `golden_set_eval.py --debug`
+once. If the room-temperature-superconductors query wrongly refuses
+again, treat it as confirmed and design the criterion 2 exception
+described above. If it now answers normally (or lands ambiguous), this
+was retrieval-content drift, not a stable regression, and D-085 should
+be considered a clean, unambiguous win with no open follow-up.
+Separately: this run's 100% result is real cause to revisit the
+`readme.md` wording in section 6 ("catches most of them, but not 100%
+reliably yet") -- worth updating once a SECOND full run confirms this
+wasn't a one-off, consistent with this project's own standing rule
+(D-048 era) of not updating public-facing numbers off a single run.
+
+### D-090 — Fixed B-025 (uncaught `Llama()` construction failure); real root cause of the user's crash still unknown, diagnostic steps requested rather than guessed
+
+**Context:** user's real-hardware `golden_set_eval.py --debug` run,
+immediately after D-089's confirmation run succeeded, crashed with
+`ValueError: Failed to create llama_context` -- the same machine that
+had just successfully completed a full 50-query run moments earlier
+in the same session. Fixed the code-level gap (B-025: this exception
+type was never caught anywhere in the call chain) but did NOT guess at
+why the underlying `llama_cpp` context allocation itself failed --
+per this project's own repeated discipline (D-015/D-016's SIMD
+hypothesis being wrong, D-065's temperature hypothesis being wrong
+before the real cause was found), a plausible-sounding guess here
+would risk the same mistake: acting on an unconfirmed theory instead
+of getting real diagnostic evidence first.
+
+**What changed the diagnostic picture:** because `FathomModel.__init__`
+now retries once with `verbose=True` on failure (B-025's fix),
+llama.cpp's own internal init log will print to stderr on the NEXT
+occurrence, before the Python-level `RuntimeError` is raised. That log
+line is the actual evidence needed to distinguish between the three
+ranked candidates named in B-025's error message:
+
+1. **Insufficient available RAM at context-allocation time.**
+   `use_mmap=False` (D-017) keeps the full ~2.4-2.6GB of weights
+   resident, and `n_ctx=8192`'s KV cache is allocated on top of that --
+   this project's own history (D-016/D-029) already documents this
+   specific machine running close to its practical memory/performance
+   ceiling with unexplained variance. If something else was using more
+   RAM at the moment of the crash (another program, a browser tab, a
+   second Fathom process still holding the model from the prior run)
+   than when the 50-query run succeeded minutes earlier, this is the
+   most likely candidate -- consistent with the crash occurring
+   immediately after, not during, a long successful run.
+2. **A corrupted or partially-written model file.** Unlikely given the
+   file loaded successfully in the same session moments before, but not
+   impossible if something touched the file between runs (antivirus
+   quarantine-and-restore, a second process writing to the same path).
+3. **A `llama-cpp-python` build/quantization mismatch.** Very unlikely
+   given the identical build loaded successfully in the same session --
+   included in B-025's message only because it's a generic candidate
+   for this exception class, not because anything here suggests it is
+   actually the cause this time.
+
+**Explicitly not chosen among these without evidence.** Asking the
+user to re-run and paste the new verbose diagnostic output (now
+produced automatically by B-025's retry) rather than picking one of
+the three and writing a fix for it.
+
+**Files touched:** none this entry -- see B-025 (debug.md) for the
+actual code change.
+**Verification:** N/A, no code changed in this entry specifically.
+**Not yet done:** the actual root cause. This is a genuine open
+question, not a solved one -- B-025 makes the NEXT occurrence
+diagnosable, it doesn't explain THIS one.
+**Next action for next session:** re-run `python tests/eval/
+golden_set_eval.py --debug` (or `watchlist_eval.py` for a faster
+check). If it fails again, paste the full output -- B-025's verbose
+retry should now print llama.cpp's own diagnostic line before the
+final `RuntimeError`, which is the actual evidence this needs. If it
+succeeds this time, that's itself informative (points toward
+candidate 1, a transient resource contention issue, rather than a
+stable file/build problem) -- worth noting either way, not just
+treated as "problem gone."
+
+### D-091 — B-025's crash did NOT recur on an identical re-run; consistent with transient resource contention (D-090's candidate 1), not a stable file/build defect
+
+**Context:** user re-ran `watchlist_eval.py --debug` (same command
+family that crashed in D-090, same machine, no code changes to
+retrieval/generation logic since B-025 -- only the failure-handling
+path itself changed). Result: clean run, no crash, no verbose retry
+triggered (nothing failed, so B-025's diagnostic retry never had a
+reason to fire). False-premise catch rate 100.0% (8/8) again, D-088's
+retag confirmed behaving correctly (`domain_gate_refused` subset now
+correctly n=1 -- JWST only -- `needs_evidence` n=7, matching the
+retagged Wikipedia/Amazon exactly as expected).
+
+**What this does and doesn't tell us about the original crash:** the
+model loading and running successfully again, on the identical setup,
+minutes to hours after a hard `Llama()` construction failure, is
+consistent with D-090's ranked candidate 1 (transient RAM contention
+at the moment of the crash -- something else briefly competing for
+memory during context allocation) rather than candidates 2 or 3
+(corrupted file, build mismatch) -- both of those would be expected to
+fail identically on a same-setup retry, and this one didn't. This is
+consistent with, not proof of, candidate 1 -- a single non-recurrence
+doesn't positively identify a transient cause any more than the
+original single crash positively identified a stable one. No verbose
+diagnostic log was produced this time because nothing failed, so the
+actual "smoking gun" evidence B-025 was built to capture still doesn't
+exist yet.
+
+**Decision: treat this as resolved-for-now, not root-caused.** Per
+this project's own repeated practice (D-029's latency variance is
+still, to this day, an open and undiagnosed question after being
+first raised many sessions ago) -- an intermittent, non-reproducing
+failure with a plausible-but-unconfirmed explanation doesn't get a
+code fix chasing it further without more evidence. B-025's actual
+value stands regardless: if this recurs, the next occurrence will
+produce the diagnostic detail this one didn't.
+
+**Files touched:** none -- confirmation entry only.
+**Verification:** N/A, no code changed.
+**Not yet done:** nothing actionable remains on this specific incident
+unless it recurs. If it does, the verbose retry's stderr output is the
+next real evidence to act on -- not a fourth theory.
+**Next action for next session:** none specific to B-025/D-090/D-091.
+Resume the standing Phase 10 open item: confirm whether the
+`answerable` false-positive on "room-temperature superconductors"
+(D-089) is stable via one more full `golden_set_eval.py` run, or was
+itself retrieval-content-drift noise -- unrelated to this incident,
+still the actual next open question for Phase 10.
+
+### D-092 — Prepped v1 closure: `readme.md` finalized, `phases.md` Phase 10 status block updated to name the single remaining blocker precisely
+
+**Context:** user asked to close v1 completely. Checked `phases.md`'s
+three literal Phase 10 exit criteria against actual current state
+rather than assuming "mostly done" means "done":
+
+1. Metrics logged in `status.md` -- already met, extensive real
+   history through D-091.
+2. `readme.md` finalized -- NOT yet done going into this entry (still
+   carried the pre-D-085 hedge language). Fixed this session: section
+   6 rewritten to state the real post-D-085 false-premise reliability
+   honestly (explicitly framed as "a strong recent result," not a
+   permanent guarantee -- this project's own history has already seen
+   this exact metric read differently between consecutive runs, so
+   overclaiming permanence here would repeat a mistake already made
+   once with the citation-accuracy number circa D-048). Also added
+   honest disclosure of D-089's real side effect (occasional
+   over-refusal on active, unsettled research-frontier questions) --
+   consistent with `prd.md` §2's own stated goal of never silently
+   hallucinating; the same principle argues against silently omitting
+   a known new failure mode from the user-facing manual either.
+3. Tag v1.0 -- exists, was re-cut once (D-087), but is stale again by
+   one real commit (B-025's crash-handling fix). Not re-cut a second
+   time yet -- deliberately holding until the one open item below
+   resolves, so the tag doesn't need a third re-cut immediately after.
+
+**The one genuinely blocking item, named explicitly rather than left
+implicit:** D-089's answerable-false-positive finding (room-temperature
+superconductors, 7.1% on one full run) has not been re-tested. Per
+this project's own repeated, hard-won discipline against trusting
+single-run evidence-classification results (D-067, D-069, D-070,
+D-075 -- and now D-089 itself, which explicitly asked for exactly this
+follow-up), one more full `golden_set_eval.py --debug` run is the last
+step standing between "Phase 10 looks done" and "Phase 10 is
+confirmed done." Everything else this entry touches is prep work
+completed in parallel, not a substitute for that run.
+
+**Files touched:** `docs/readme.md` (section 6 rewritten),
+`docs/phases.md` (Phase 10 status block appended with an explicit
+closure-status checklist).
+**Verification:** confirmed no test file reads `readme.md`'s content
+directly (grep across `tests/unit/*.py`) -- the wording change carries
+zero regression risk to the automated suite. No test suite re-run
+needed since no `src/`/`tests/` code changed this entry.
+**Not yet done:** the confirmation run. `v1.0-windows`'s final re-cut,
+held pending that run's outcome.
+**Next action for next session:** run `golden_set_eval.py --debug`
+once more. If the superconductors query passes or lands ambiguous,
+re-cut `v1.0-windows` at HEAD and Phase 10 is genuinely closed -- no
+further doc work needed. If it fails the same way again, design the
+targeted criterion-2 guard-clause exception named in D-089 first, then
+re-cut the tag once that fix is itself confirmed.
+
 ---
 **Return to `/context.md` for next steps.**

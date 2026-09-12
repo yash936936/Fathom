@@ -126,11 +126,24 @@ Then just type your questions one after another. Type `exit` or
 - **Citation accuracy is a work in progress.** Most citations check
   out, but not all of them yet. Don't stake anything important on a
   single number or quote without a quick look at the source.
-- **The "is this question even real" check is still being tuned.**
-  Fathom is meant to catch trick questions built on a false premise
-  (like "why did X shut down" when it never did) — it catches most
-  of them, but not 100% reliably yet. If an answer feels like it's
-  taking a strange premise at face value, question it.
+- **The "is this question even real" check just got a lot more
+  reliable.** Fathom is meant to catch trick questions built on a
+  false premise (like "why did X shut down" when it never did). The
+  most recent full evaluation caught every one of these test
+  questions — a large jump from earlier versions. This number has
+  moved around between test runs in the past, so treat it as a
+  strong, recent result rather than a permanent guarantee, but the
+  underlying issue behind the earlier inconsistency has been
+  identified and fixed.
+- **One narrower thing to know because of that same fix:** Fathom is
+  now slightly more likely to decline a question about an active,
+  unsettled research frontier (for example, "has room-temperature
+  superconductivity been achieved?") if it can't find confirmed
+  evidence either way — even though that's a legitimate research
+  question, not a false premise. If a refusal on a cutting-edge or
+  disputed topic seems wrong, try rephrasing toward what's actually
+  been reported (e.g., "what recent progress has been reported toward
+  X" rather than "has X been achieved").
 - **It needs an internet connection** to search for information, even
   though the "brain" itself runs locally on your machine. Nothing you
   ask gets sent anywhere except the live searches needed to answer it.

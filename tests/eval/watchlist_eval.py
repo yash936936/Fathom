@@ -32,16 +32,14 @@ regression. Edit `watchlist.jsonl` directly to change what's tracked --
 this file's logic doesn't care what's in it, same `load_golden_set`
 loader and category validation as the full set.
 
-NOTE on a discrepancy found while building this list, not yet
-resolved: the Wikipedia and Amazon entries are tagged
-`domain_gate_refused` in `golden_set.jsonl` (their originally-observed
-subtype), but the most recent real transcript (the run analyzed in
-D-084) shows BOTH reaching the evidence-based check with
-`domain_ok=True` -- i.e. NOT refused by domain_gate that run. Carried
-through unchanged here rather than silently re-tagged, since this
-project's own practice (D-068) is to tag subtype from observed
-behavior, not guess it -- the next watchlist run's `--debug` output
-will show directly which mechanism actually handles each one now.
+NOTE (RESOLVED, D-088): Wikipedia and Amazon were originally tagged
+`domain_gate_refused`, but TWO consecutive real runs (D-084's original
+transcript and D-087's watchlist confirmation run) both show
+`domain_ok=True` for both -- i.e. they reach the evidence-based check,
+not a domain-gate refusal. Per this project's own practice (D-068) of
+tagging subtype from observed behavior rather than guessing, and now
+with two independent real observations rather than one, both are
+retagged `needs_evidence` here and in `golden_set.jsonl`.
 """
 
 from __future__ import annotations

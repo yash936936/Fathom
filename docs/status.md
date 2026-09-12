@@ -7,6 +7,98 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 074): D-092 -- v1 closure prep done, one genuine
+  blocker remains, named explicitly.** `readme.md` finalized (section
+  6 rewritten to honestly reflect D-085's real improvement without
+  overclaiming permanence, plus disclosure of D-089's real
+  over-refusal side effect on unsettled-research-frontier questions).
+  `phases.md`'s Phase 10 section now states a precise closure
+  checklist against its own 3 literal exit criteria: metrics logged
+  (met), readme finalized (met, this entry), tag v1.0 (exists, stale
+  by one commit -- B-025 -- held pending the item below rather than
+  re-cut twice in a row). **The one blocking item: D-089's
+  answerable-false-positive finding (superconductors query, 7.1%, one
+  full run) still needs a second full `golden_set_eval.py` run before
+  it can be called stable or noise**, per this project's own repeated
+  rule against single-run evidence-classification conclusions. No code
+  changed this entry -- doc-only, zero regression risk (confirmed no
+  test reads `readme.md` directly).
+- **UPDATE (Entry 073): D-091 -- B-025's crash did NOT recur** on an
+  identical re-run (`watchlist_eval.py --debug`, same machine, no
+  code changes since the fix). Consistent with D-090's "transient RAM
+  contention" candidate, not a stable file/build defect -- but not
+  proof of it either, since no verbose diagnostic fired (nothing
+  failed this time). D-088's retag confirmed behaving correctly in
+  the same run: `domain_gate_refused` subset now correctly n=1 (JWST
+  only). False-premise catch rate 100.0% (8/8) held again. Treated as
+  resolved-for-now, not root-caused -- no further code change made
+  chasing a non-reproducing failure, consistent with this project's
+  own standing precedent (D-029's latency variance remains open for
+  the same reason). **Standing next step, unrelated to this incident:**
+  one more full `golden_set_eval.py` run to check whether D-089's
+  "room-temperature superconductors" false-positive was stable or
+  drift-noise.
+- **UPDATE (Entry 072): B-025/D-090 -- fixed a real, previously-
+  undiscovered crash-handling gap.** User's `golden_set_eval.py
+  --debug` run crashed with an uncaught `ValueError: Failed to create
+  llama_context` immediately after a fully successful 50-query run in
+  the same session -- `FathomModel.__init__` never wrapped `Llama()`
+  construction in try/except at all, and the existing `except
+  RuntimeError` clauses in `golden_set_eval.py`/`watchlist_eval.py`/
+  `first_run_check.py` don't catch `ValueError`, so it propagated as a
+  raw traceback. Fixed: construction failures are now caught, retried
+  once with `verbose=True` forced on (to surface llama.cpp's own
+  diagnostic log, currently swallowed by the default `verbose=False`),
+  and re-raised as an actionable `RuntimeError` naming three ranked
+  likely causes (transient RAM contention given `use_mmap=False`'s
+  resident-memory design; corrupted/partial file; build mismatch).
+  409/409 across all 22 test files (up from 400/400 across 21).
+  **The actual root cause of the user's specific crash is still
+  unknown** -- deliberately not guessed at; D-090 asks for a re-run
+  with the new verbose diagnostic output rather than picking one of
+  the three candidates without evidence.
+- **UPDATE (Entry 071): D-089 -- D-085 CONFIRMED AT FULL SCALE. False-
+  premise catch rate hit 100.0% (15/15) for the first time ever in
+  this project's history** (prior range across 15+ runs: 33.3%-91.7%).
+  Both subtypes 100.0%. Off-domain refusal still 100.0%. **Real
+  regression also found, directly traced to the same fix, not
+  coincidental:** answerable false-positive rate rose to 7.1% (1/14) --
+  "room-temperature superconductors" query, previously `confidence=0.3
+  ambiguous=True` (correctly fell through to a caveated answer), now
+  `confidence=0.95 ambiguous=False` (hard refusal). Root cause: this
+  query sits in `_SYSTEM_PROMPT_WITH_EVIDENCE`'s criterion 2 edge case
+  (active, disputed research frontier with no confirmed breakthrough)
+  -- the old confidence-semantics bug was likely, by coincidence,
+  masking this exact edge case behind a low-confidence ambiguous
+  fallback; D-085 removed that noise and exposed a pre-existing
+  prompt weakness rather than introducing a new one. Not fixed this
+  entry -- one occurrence isn't enough given this project's own
+  repeated experience with single-run evidence-classification
+  artifacts (D-067/D-069/D-070/D-075). Recommended: one repeat run to
+  confirm stability before touching criterion 2's guard clause.
+  `readme.md` intentionally NOT updated yet -- one clean run doesn't
+  meet this project's own bar (D-048-era) for updating public-facing
+  numbers.
+- **UPDATE (Entry 070): D-087 CONFIRMED on real hardware, D-088
+  follow-up retag done.** `watchlist_eval.py --debug` run: all 6
+  targeted `confidence=0.0` misses now score 0.95-0.99, `ambiguous=
+  False` -- clean sweep, zero intermediate values. Watchlist
+  false-premise catch rate 100.0% (8/8). Off-domain/answerable
+  controls unaffected. `v1.0-windows` tag re-cut at HEAD by the user
+  (confirmed via terminal output: old tag deleted, new annotated tag
+  pushed) -- now reflects B-022 through D-087/D-088, not the stale
+  pre-B-022 snapshot. D-088: retagged Wikipedia/Amazon
+  `domain_gate_refused` -> `needs_evidence` in both `golden_set.jsonl`
+  and `watchlist.jsonl`, confirmed by two independent real runs.
+  `needs_evidence` subset now n=10 (was 8), `domain_gate_refused` now
+  n=5 (was 7); total false_premise count unchanged at 15. 400/400
+  across all 21 test files, unaffected by the retag (only synthetic
+  fixtures reference these subtype labels in tests).
+  **Explicitly not over-claimed:** this is an n=8 subset result,
+  weighted toward the queries most likely to improve -- does NOT by
+  itself confirm the full 50-entry false-premise catch rate improved
+  by the same margin. Full `golden_set_eval.py` run is still the real
+  next step before treating Phase 10's headline metric as settled.
 - **UPDATE (Entry 068): D-086 -- built `tests/eval/watchlist_eval.py`,
   a fast curated-subset re-run harness.** 10 hand-picked entries
   (`watchlist.jsonl`): the 6 confidence=0.0 misses D-085 targets, 2

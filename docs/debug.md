@@ -723,5 +723,77 @@ fix in this project. Next `golden_set_eval.py --debug` run is the
 actual test: do the transistor and inflation-rate queries stop
 appearing in `WRONGLY REFUSED:`.
 
+### B-025 — `FathomModel.__init__` never caught `Llama()`'s own construction failures, so a real crash reached the user as a bare, undiagnosable `ValueError`
+
+**Symptom (real hardware):** `python tests/eval/golden_set_eval.py
+--debug` crashed with an uncaught
+`ValueError: Failed to create llama_context`, raised from inside
+`llama_cpp`'s own `internals.py`, propagating straight through
+`FathomModel.__init__`, `get_model()`, and `golden_set_eval.py`'s
+`except (ModelNotFoundError, RuntimeError)` clause without being
+caught by any of them -- a full Python traceback with no actionable
+information, on a machine that had successfully loaded and run this
+exact model in every prior session this project has on record
+(D-057: 48.4s load, multiple successful runs since).
+
+**Root cause, two compounding issues, neither previously noticed
+because the happy path never exercises either:**
+1. `self._llama = Llama(...)` in `FathomModel.__init__` was a bare,
+   unwrapped call -- no try/except anywhere in the constructor. Any
+   failure from `llama_cpp` (which can raise `ValueError`, `OSError`,
+   or other types depending on version and failure mode) propagated
+   as whatever type `llama_cpp` itself raised, not something callers
+   were prepared for.
+2. Every existing caller that DOES try to handle a load failure
+   gracefully (`golden_set_eval.py`, `watchlist_eval.py`,
+   `first_run_check.py`) catches `RuntimeError` specifically --
+   `ValueError` is not a subclass of `RuntimeError`, so none of them
+   would have caught this even if it had been anticipated. This is
+   the same class of gap as B-021 (citation_verifier's flat-array
+   parse failure) and B-019 (build platform guard) -- a real failure
+   mode nobody wrote a path for because nobody had seen it happen yet.
+
+**Separately, a real diagnostic gap on top of the crash itself:**
+`FathomModel.__init__` defaults to `verbose=False`, which suppresses
+llama.cpp's OWN internal init logging -- the actual C++-level detail
+(out-of-memory during context allocation vs. a corrupted file vs. a
+build/quantization mismatch) that would explain WHY construction
+failed. With `verbose=False`, that information is silently discarded
+at the moment it's most needed, leaving only the generic wrapper
+message `"Failed to create llama_context"` with no further detail.
+
+**Fix:** wrapped the `Llama(...)` construction in try/except. On any
+`Exception`, if the caller's `verbose` setting was `False` (the
+default), a SECOND attempt is made with `verbose=True` forced on --
+purely to get llama.cpp's own diagnostic output onto stderr before
+giving up, not as a retry hoping for a different outcome (a genuine
+resource/corruption failure won't spontaneously succeed on the second
+try; this is diagnostic, not resilience). Either way, the final
+failure is re-raised as a `RuntimeError` (now actually catchable by
+every existing caller) with the original exception's type and message,
+plus concrete, ranked likely causes and next steps (insufficient RAM
+for context allocation given `use_mmap=False`'s resident-memory
+design per D-017; a corrupted/partial download, pointing at
+`first_run_check.py`; a `llama-cpp-python` build mismatch, with the
+`--force-reinstall` command). A caller who already passed
+`verbose=True` gets no redundant second attempt, since there's nothing
+left to learn from repeating the exact same call.
+
+**Files touched:** `src/core/llm_backend.py`,
+`tests/unit/test_llm_backend_load_errors.py` (new -- 9 checks using a
+fake `llama_cpp` module injected via `sys.modules`, no real model
+needed: failure is caught and converted, the retry receives
+`verbose=True` specifically, no redundant retry when already verbose,
+and the happy path makes exactly one construction attempt with
+`self.n_ctx` set correctly, confirming zero behavior change on
+success).
+**Verification:** 9/9 in the new test file, 409/409 across all 22
+files in `tests/unit/` (up from 400/400 across 21).
+**NOT a fix for the underlying cause of the original crash** -- this
+makes the failure diagnosable and gives the user actionable next
+steps; it does not know or claim to know why context creation failed
+on that specific run. See decisions.md D-090 for the requested
+diagnostic follow-up.
+
 ---
 **Return to `/context.md` for next steps.**

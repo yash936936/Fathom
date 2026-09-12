@@ -106,14 +106,71 @@ class FathomModel:
         # speed) and measured ~2x faster generation in practice. This
         # trades load time for generation time, which is the right trade
         # for a tool that loads once and answers many queries per run.
-        self._llama = Llama(
-            model_path=str(self.model_path),
-            n_ctx=n_ctx,
-            n_threads=n_threads or os.cpu_count() or 4,
-            n_gpu_layers=0,
-            use_mmap=False,
-            verbose=verbose,
-        )
+        #
+        # B-025: the Llama() constructor is NOT wrapped in try/except by
+        # llama-cpp-python itself -- a load-time failure (context
+        # allocation OOM, a corrupted/partial GGUF, a build mismatch)
+        # raises a bare, uncaught ValueError/OSError straight out of this
+        # function, with no actionable message and -- because verbose is
+        # False by default -- no diagnostic detail either, since
+        # llama.cpp's own internal init logging is what verbose=True
+        # actually controls, and that's exactly the information that
+        # would explain WHY construction failed. Caught here and
+        # re-raised as a clear RuntimeError; a second attempt with
+        # verbose=True forced on is made specifically so llama.cpp's own
+        # diagnostic output reaches stderr before we give up, rather than
+        # silently discarding the one piece of information that would
+        # actually explain the failure.
+        try:
+            self._llama = Llama(
+                model_path=str(self.model_path),
+                n_ctx=n_ctx,
+                n_threads=n_threads or os.cpu_count() or 4,
+                n_gpu_layers=0,
+                use_mmap=False,
+                verbose=verbose,
+            )
+        except Exception as exc:  # noqa: BLE001 -- llama_cpp raises several
+            # different exception types (ValueError, OSError) depending
+            # on version and failure mode; all of them mean the same
+            # thing to a caller here: the model failed to load.
+            if not verbose:
+                print(
+                    "Fathom: initial model load failed, retrying once "
+                    "with verbose logging to capture the real cause...",
+                    file=sys.stderr,
+                )
+                try:
+                    self._llama = Llama(
+                        model_path=str(self.model_path),
+                        n_ctx=n_ctx,
+                        n_threads=n_threads or os.cpu_count() or 4,
+                        n_gpu_layers=0,
+                        use_mmap=False,
+                        verbose=True,
+                    )
+                except Exception as verbose_exc:
+                    raise RuntimeError(
+                        f"Fathom model failed to load ({type(verbose_exc).__name__}: "
+                        f"{verbose_exc}).\n\n"
+                        "llama.cpp's own diagnostic output above (if any) is the "
+                        "most reliable signal for WHY -- common causes:\n"
+                        "  - Insufficient available RAM to allocate the context "
+                        f"(n_ctx={n_ctx}) on top of the resident model weights "
+                        "(use_mmap=False keeps the full file in RAM, D-017) -- "
+                        "close other memory-heavy applications and retry.\n"
+                        "  - A corrupted or partially-downloaded model file -- "
+                        "re-run installer_support/first_run_check.py, or verify "
+                        f"the file size at {self.model_path} matches the expected "
+                        "~2.4-2.6GB.\n"
+                        "  - A llama-cpp-python build that doesn't match this "
+                        "GGUF's quantization format -- try `pip install "
+                        "--force-reinstall llama-cpp-python`.\n"
+                    ) from verbose_exc
+            else:
+                raise RuntimeError(
+                    f"Fathom model failed to load ({type(exc).__name__}: {exc})."
+                ) from exc
         self.n_ctx = n_ctx
 
     def chat(

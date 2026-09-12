@@ -164,6 +164,38 @@ blocking exit criterion (`prd.md` §5 has no formal threshold on
 step whenever `golden_set_eval.py` is run again against the new
 50-entry set.
 
+**Closure status (D-084 through D-091, current as of status.md Entry
+073):** all three literal exit criteria are now either met or in their
+final confirmation step:
+- **"Metrics logged in status.md"** -- met. Extensive real-hardware
+  history through D-091, including the root cause (D-084) and fix
+  (D-085) for this project's longest-running instability (the
+  false-premise catch rate's multi-week 33.3%-91.7% swing), confirmed
+  at full 50-entry scale (D-089: 100.0%, first time ever).
+- **"readme.md finalized"** -- done this session. Section 6 rewritten
+  to state the real, current false-premise reliability honestly (a
+  strong recent result, explicitly not claimed as a permanent
+  guarantee, consistent with this project's own repeated experience of
+  this exact metric moving between runs) and to disclose D-089's
+  narrower, real side effect (occasional over-refusal on active,
+  unsettled research-frontier questions) rather than silently omitting
+  it. Citation-accuracy and Windows-only sections left unchanged --
+  no new evidence this session to revise either.
+- **"Tag v1.0"** -- `v1.0-windows` exists and was re-cut at HEAD once
+  already (D-087), but B-025's crash-handling fix (debug.md) landed
+  after that re-cut -- the tag needs ONE more re-cut once the item
+  below is resolved, not a new tagging decision.
+
+**One genuinely open item before calling Phase 10 closed:** D-089
+found a real answerable-false-positive regression (room-temperature
+superconductors, 7.1%) alongside the false-premise win, on a SINGLE
+full-scale run -- not yet confirmed stable across a second run, per
+this project's own standing discipline (D-067/D-069/D-070/D-075) of
+not trusting single-run evidence-classification results. One more full
+`golden_set_eval.py --debug` run settles this either way (stable →
+worth a targeted prompt fix before tagging; drift noise → tag as-is).
+This is the last blocking step, not a new phase of work.
+
 ## v2 (not started until v1 ships and is stable)
 Long-term memory, smart routing/fallback across hosted models, multi-agent
 orchestration, LLM gateway for multi-user mode. Extension points already
