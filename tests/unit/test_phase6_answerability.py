@@ -193,6 +193,35 @@ check(
     "how sure you are that the" in query_only_text and "NOT how likely the question's premise is true" in query_only_text,
 )
 
+# --- Test 16-19 (D-089/D-093/B-026): a second full golden-set run
+# confirmed the false-premise fix (100% x2) but ALSO confirmed a real,
+# stable answerable-false-positive regression -- two distinct failure
+# patterns, both traced to criterion 2 being applied too broadly.
+# "room-temperature superconductors" (progress-oriented question,
+# wrongly required a confirmed breakthrough) recurred identically
+# across two runs; "latest inflation rate" (a NEW failure) showed the
+# model doubting a genuinely current, correctly-dated live-search
+# result as "not a valid current date" -- a systemic risk for a tool
+# whose whole purpose is answering questions about current events.
+# Both guarded explicitly so a future prompt edit can't silently drop
+# either fix. ---
+check(
+    "D-093: criterion 2 is explicitly scoped to specific COMPLETED events only",
+    "SPECIFIC, COMPLETED EVENT" in prompt_text,
+)
+check(
+    "D-093: progress-oriented questions (advances/current state) are explicitly exempted from criterion 2",
+    "does NOT apply to" in prompt_text and "current state of a field" in prompt_text,
+)
+check(
+    "D-093/B-026: prompt explicitly forbids doubting evidence for postdating the model's training knowledge",
+    "more recent than your own training knowledge" in prompt_text,
+)
+check(
+    "D-093/B-026: prompt explicitly names the exact failure pattern (date 'can't be current'/'isn't valid')",
+    "can't be current" in prompt_text or "isn't valid" in prompt_text,
+)
+
 print()
 n_pass = sum(1 for _, ok in results if ok)
 print(f"{n_pass}/{len(results)} checks passed")

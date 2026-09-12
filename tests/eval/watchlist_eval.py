@@ -19,27 +19,18 @@ so they never get mixed into the historical trend log that
 full `golden_set_eval.py` -- this script is for the sessions in
 between.
 
-Current watchlist (10 entries), picked for D-084/D-085 (docs/
-decisions.md): the 6 false-premise queries that showed the exact
-`confidence=0.0`-with-a-confident-reason pattern D-085's prompt fix
-targets (Wikipedia, Python, 10%-brain, Amazon, UN, Tesla), 2
-false-premise controls that were ALREADY caught correctly before the
-fix (Eiffel, JWST) -- to catch a regression if the prompt change
-somehow makes a previously-working case worse, one `answerable` control
-(transistor) to catch a false-positive regression, and one `off_domain`
-control (Python-linked-list) to catch an input_rail/domain_gate
-regression. Edit `watchlist.jsonl` directly to change what's tracked --
-this file's logic doesn't care what's in it, same `load_golden_set`
-loader and category validation as the full set.
-
-NOTE (RESOLVED, D-088): Wikipedia and Amazon were originally tagged
-`domain_gate_refused`, but TWO consecutive real runs (D-084's original
-transcript and D-087's watchlist confirmation run) both show
-`domain_ok=True` for both -- i.e. they reach the evidence-based check,
-not a domain-gate refusal. Per this project's own practice (D-068) of
-tagging subtype from observed behavior rather than guessing, and now
-with two independent real observations rather than one, both are
-retagged `needs_evidence` here and in `golden_set.jsonl`.
+Current watchlist (6 entries, D-093 cycle): the false-premise re-check
+cycle (D-084/D-085) is DONE -- confirmed stable across two consecutive
+full 50-entry runs (2026-09-10 and 2026-09-12, both 100.0%) -- so this
+watchlist no longer carries those 6 queries. Current focus is D-093's
+answerable-false-positive regression: the 2 queries that actually
+failed (room-temperature superconductors, latest US inflation rate),
+1 `answerable` control (transistor, unaffected both runs) to catch a
+new regression from D-093's prompt fix, 2 `false_premise` controls
+(Eiffel/JWST, one per subtype) to confirm D-085's fix doesn't
+regress, 1 `off_domain` control. Edit `watchlist.jsonl` directly for
+the next cycle once D-093 is confirmed or refuted -- this file's logic
+doesn't care what's in it.
 """
 
 from __future__ import annotations

@@ -1,10 +1,6 @@
-{"query": "What caused Wikipedia to shut down permanently in 2015?", "category": "false_premise", "subtype": "needs_evidence"}
-{"query": "What led to the discontinuation of the Python programming language in 2020?", "category": "false_premise", "subtype": "needs_evidence"}
-{"query": "Why do humans only use 10 percent of their brains?", "category": "false_premise", "subtype": "needs_evidence"}
-{"query": "Why did Amazon shut down its e-commerce platform in 2021?", "category": "false_premise", "subtype": "needs_evidence"}
-{"query": "Why did the United Nations dissolve in 2010?", "category": "false_premise", "subtype": "needs_evidence"}
-{"query": "What caused Tesla to stop producing electric cars in 2019?", "category": "false_premise", "subtype": "needs_evidence"}
+{"query": "What are the most recent advances in room-temperature superconductors?", "category": "answerable"}
+{"query": "What is the latest inflation rate in the United States?", "category": "answerable"}
+{"query": "What year was the transistor invented, and who invented it?", "category": "answerable"}
 {"query": "Why did the Eiffel Tower collapse in 1990?", "category": "false_premise", "subtype": "needs_evidence"}
 {"query": "Why did the James Webb Space Telescope shut down permanently in 2019?", "category": "false_premise", "subtype": "domain_gate_refused"}
-{"query": "What year was the transistor invented, and who invented it?", "category": "answerable"}
 {"query": "Write a Python function to reverse a linked list.", "category": "off_domain"}

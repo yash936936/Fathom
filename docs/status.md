@@ -7,6 +7,25 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 075): D-093/B-026 -- second full run resolved D-092's
+  branch precisely: false-premise fix CONFIRMED STABLE (100.0% x2
+  consecutive full runs), answerable-false-positive regression
+  CONFIRMED REAL, not drift noise (7.1%→14.3%, superconductors failed
+  identically both times, plus a new, more concerning inflation-rate
+  failure where the model doubted correctly-dated live evidence as
+  "not a valid current date" because it postdates its own training
+  knowledge).** Designed and shipped the targeted fix D-089/D-092 said
+  would be needed if this happened: criterion 2 now explicitly scoped
+  to specific completed events only (exempting progress/current-state
+  questions), plus an explicit instruction never to doubt evidence for
+  postdating training knowledge. `watchlist.jsonl` refreshed -- the
+  original D-084/D-085 target queries removed (that question is
+  settled), replaced with the 2 new regression targets plus controls.
+  409/409 across all 22 test files. **`v1.0-windows` deliberately NOT
+  re-cut yet** -- this fix itself needs real-hardware confirmation
+  first (watchlist_eval.py, then a full golden_set_eval.py run) before
+  v1 can actually close. This is now the last blocking item, replacing
+  the prior one.
 - **UPDATE (Entry 074): D-092 -- v1 closure prep done, one genuine
   blocker remains, named explicitly.** `readme.md` finalized (section
   6 rewritten to honestly reflect D-085's real improvement without

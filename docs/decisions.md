@@ -4768,5 +4768,66 @@ further doc work needed. If it fails the same way again, design the
 targeted criterion-2 guard-clause exception named in D-089 first, then
 re-cut the tag once that fix is itself confirmed.
 
+### D-093 — Fixed B-026: two consecutive full runs confirmed the false-premise fix is stable (100.0% x2) AND confirmed the answerable-false-positive regression is real, not drift noise. Designed the targeted fix D-089/D-092 said would be needed, rather than tagging around it
+
+**Context:** the second full `golden_set_eval.py --debug` run D-092
+asked for as the last blocking item before v1 closure. Result: exactly
+the two possible outcomes named in D-092 did NOT resolve cleanly to
+either -- false-premise catch rate held at 100.0% (both subtypes,
+second consecutive full-scale confirmation), but the
+answerable-false-positive rate went from 7.1% to 14.3%, and the
+superconductors query failed in the IDENTICAL way both times. Per
+D-092's own stated branching logic ("if it fails the same way again,
+design the targeted fix before tagging"), this is now the confirmed,
+not-drift-noise case -- proceeding to the fix rather than re-cutting
+the tag around an unresolved known regression.
+
+**Two distinct root causes, not one, found by reading both failing
+queries' actual `reason` text rather than assuming a single
+mechanism:** see debug.md B-026 for the full writeup. Summary:
+criterion 2 was scoped for false-premise-style "did X happen" claims
+but was firing on plain progress-oriented `answerable` questions
+(superconductors); separately, the model exhibited a genuine
+date-currency blind spot, doubting correctly-dated live evidence
+because it postdates its own training knowledge (inflation) -- a
+NEWLY discovered failure mode with broader implications than this one
+query, since `prd.md`'s entire premise is fresh, post-cutoff
+information.
+
+**Both fixed in the same prompt, not sequentially across two entries,**
+since both were found in the same run and both are scoped, targeted
+additions to the same `_SYSTEM_PROMPT_WITH_EVIDENCE` rather than a
+rewrite -- consistent with this project's preference (D-069, D-070,
+D-085) for narrow, named additions over broad prompt rewrites when the
+existing structure is otherwise working (criterion 1 and the rest of
+criterion 2 are NOT touched; the false-premise catch rate this prompt
+is also responsible for should not be put at risk by an unrelated
+rewrite).
+
+**Watchlist refreshed, not just the prompt:** `tests/eval/
+watchlist.jsonl`'s original 6 target queries (D-084/D-085) are removed
+-- that question is answered, confirmed stable across two full-scale
+runs, no longer worth spending watchlist cycles re-checking every
+session. Replaced with the 2 D-093 regression targets plus controls
+covering both categories this fix touches.
+
+**Files touched:** see B-026 (debug.md) for the full file list.
+**Verification:** 409/409 across all 22 sandbox-runnable test files.
+**Not yet done:** real-hardware confirmation of this fix -- same
+standing gap as every fix in this project before its first real run.
+`v1.0-windows` remains un-re-cut, correctly, until this is confirmed --
+tagging now would repeat the exact mistake this project already
+caught itself making with the original stale tag (D-084).
+**Next action for next session:** run `python tests/eval/
+watchlist_eval.py --debug` first (fast, 6 entries, directly targets
+both regressions). If both the superconductors and inflation queries
+now answer normally (or land ambiguous rather than a confident hard
+refusal), follow up with one full `golden_set_eval.py --debug` run to
+confirm (a) the false-premise metric is unaffected by this prompt
+change and (b) no NEW answerable false-positive appeared elsewhere in
+the 14 total `answerable` queries. Only once both come back clean
+should `v1.0-windows` be re-cut at HEAD -- that would be the actual,
+final close of Phase 10 and v1.
+
 ---
 **Return to `/context.md` for next steps.**

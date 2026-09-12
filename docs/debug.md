@@ -795,5 +795,90 @@ steps; it does not know or claim to know why context creation failed
 on that specific run. See decisions.md D-090 for the requested
 diagnostic follow-up.
 
+### B-026 — `answerability.py`'s evidence-based criterion 2, and a general date-currency blind spot, produced two confirmed-stable false refusals on genuinely answerable queries once D-085 stopped masking them with confidence noise
+
+**Symptom (real hardware, two consecutive full 50-entry runs, 2026-09-10
+and 2026-09-12):** `answerable_false_positive_refusal_rate` rose from
+0.0% (pre-D-085 baseline) to 7.1% then 14.3%. Two distinct queries,
+confirmed recurring (superconductors: both runs) or newly appearing
+(inflation: second run only, but with the same structural pattern),
+both `refusal_type=answerability`, both `confidence=0.95,
+ambiguous=False` -- i.e. confidently, not marginally, wrong.
+
+**Root cause 1 (superconductors, recurred identically both runs):**
+`_SYSTEM_PROMPT_WITH_EVIDENCE`'s criterion 2 ("evidence discusses the
+subject in depth but never corroborates the specific claimed event")
+was written for false-premise queries asserting a specific completed
+event (a company shutting down, a landmark collapsing) but was being
+applied, via the SAME shared prompt, to plain `answerable`-category
+progress questions ("what are the recent advances in X"). Those
+questions don't assert any specific completed event at all -- "recent
+advances" is satisfied by describing partial, ongoing, or unconfirmed
+progress, which the retrieved evidence actually did contain (record
+temperatures under pressure, active research efforts). The classifier
+required a fully "achieved/confirmed" breakthrough before agreeing the
+question was answerable, which is a stricter bar than the question
+itself asks for.
+
+**Root cause 2 (inflation rate, new this run):** the model's own
+`reason` text stated evidence citing "3.4% ... as of August 2026" was
+unusable because August 2026 "is not a current or valid date" --
+i.e. it doubted genuinely current, correctly-dated live-search
+evidence because the date exceeded its own training knowledge, then
+used that doubt to justify `answerable=false` on a question the
+evidence directly answered. This is a materially more concerning
+pattern than root cause 1: it's a systemic risk for a tool whose
+entire premise (`prd.md` §1) is answering questions about
+fast-moving, post-cutoff information -- any "latest X" query risks the
+same failure if the model's training cutoff falls before the
+retrieved evidence's date, which will only become MORE common as time
+passes and the underlying weights don't update.
+
+**Why D-085 exposed both instead of introducing either:** before
+D-085, whichever reasoning produced these refusals almost certainly
+carried the same premise-truth/verdict-confidence semantic confusion
+D-084 diagnosed -- landing on a coincidentally low confidence number
+that triggered the safe ambiguous-fallback path instead of a hard
+refusal. D-085 made the model's conviction legible; it didn't create
+the underlying misjudgment, it just stopped hiding it. Confirmed by
+the 2nd full run: the false-premise metric this fix targets held
+stable at 100% both times, while this specific side effect got WORSE
+(7.1%→14.3%), consistent with an underlying issue getting more
+consistently triggered now that confidence reporting is unambiguous,
+not with the fix itself degrading over time.
+
+**Fix:** two additions to `_SYSTEM_PROMPT_WITH_EVIDENCE` (with-evidence
+check only -- `_SYSTEM_PROMPT_QUERY_ONLY` runs before retrieval and has
+no evidence to misjudge the date of):
+1. Criterion 2 explicitly scoped to questions asserting a "SPECIFIC,
+   COMPLETED EVENT," with an explicit carve-out naming progress/
+   current-state questions and stating that partial or unconfirmed
+   progress is a sufficient answer.
+2. An explicit instruction never to doubt evidence for postdating the
+   model's own training knowledge, naming the exact failure phrase
+   ("can't be current"/"isn't valid") this run produced, so the model
+   is corrected against its own observed error text, not a
+   hypothetical one.
+
+**Files touched:** `src/verification/answerability.py`
+(`_SYSTEM_PROMPT_WITH_EVIDENCE`), `tests/unit/test_phase6_
+answerability.py` (+4 checks guarding both additions survive future
+edits), `tests/eval/watchlist.jsonl` (refreshed -- D-084/D-085's 6
+target queries removed now that that fix is confirmed stable across 2
+full runs; replaced with the 2 D-093 regression targets plus 4
+controls), `tests/eval/watchlist_eval.py` (docstring updated),
+`tests/unit/test_watchlist_eval.py` (updated to match the refreshed
+6-entry watchlist).
+**Verification:** 31/31 in `test_phase6_answerability.py` (up from
+27/27), 8/8 in `test_watchlist_eval.py` (updated, same count),
+409/409 across all 22 files in `tests/unit/`.
+**Not yet done:** real-hardware confirmation. This is a prompt-wording
+fix to a local model's classifier -- could resolve both patterns,
+resolve one but not the other (they have different root causes),
+or, least likely, have no effect. Recommend `watchlist_eval.py`
+--debug` as the fast check, followed by a full `golden_set_eval.py`
+run before any tag decision, given this touches the same prompt the
+false-premise metric depends on.
+
 ---
 **Return to `/context.md` for next steps.**

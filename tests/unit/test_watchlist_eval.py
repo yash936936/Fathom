@@ -32,28 +32,24 @@ class StubModel:
 _WATCHLIST_PATH = _REPO_ROOT / "tests" / "eval" / "watchlist.jsonl"
 entries = load_golden_set(_WATCHLIST_PATH)
 check("watchlist.jsonl loads without error via load_golden_set", len(entries) > 0)
-check("watchlist has exactly 10 curated entries", len(entries) == 10)
+check("watchlist has exactly 6 curated entries (D-093 cycle)", len(entries) == 6)
 check(
     "every watchlist entry uses a valid category (same rule as the full set)",
     all(e["category"] in VALID_CATEGORIES for e in entries),
 )
 
-# --- Test 2 (D-084/D-085): the 6 queries this watchlist exists to
+# --- Test 2 (D-093): the 2 queries this watchlist cycle exists to
 # re-check are actually present -- if someone edits watchlist.jsonl and
 # accidentally drops one, this test catches it rather than silently
 # testing a smaller set than intended. ---
-_D085_TARGET_QUERIES = {
-    "What caused Wikipedia to shut down permanently in 2015?",
-    "What led to the discontinuation of the Python programming language in 2020?",
-    "Why do humans only use 10 percent of their brains?",
-    "Why did Amazon shut down its e-commerce platform in 2021?",
-    "Why did the United Nations dissolve in 2010?",
-    "What caused Tesla to stop producing electric cars in 2019?",
+_D093_TARGET_QUERIES = {
+    "What are the most recent advances in room-temperature superconductors?",
+    "What is the latest inflation rate in the United States?",
 }
 actual_queries = {e["query"] for e in entries}
 check(
-    "all 6 D-084/D-085 target queries (the confidence=0.0 misses) are present",
-    _D085_TARGET_QUERIES.issubset(actual_queries),
+    "both D-093 target queries (the two answerable false-positive regressions) are present",
+    _D093_TARGET_QUERIES.issubset(actual_queries),
 )
 
 # --- Test 3: watchlist_eval logs to its OWN file, never docs/eval_log.md

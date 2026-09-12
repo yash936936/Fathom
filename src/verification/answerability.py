@@ -72,6 +72,30 @@ touches the topic -- that is a retrieval/sufficiency concern, not \
 this check's job, and should be answered normally or left to the \
 sufficiency check.
 
+Criterion 2 applies ONLY when the question asserts that a SPECIFIC, \
+COMPLETED EVENT happened (e.g. "why did X shut down", "why did X \
+collapse", "what caused X to be discontinued"). It does NOT apply to \
+open-ended questions about ongoing progress, trends, or the current \
+state of a field (e.g. "what are the recent advances in X", "what is \
+the current state of X research") -- for those, evidence describing \
+partial, incremental, or still-unconfirmed progress IS a sufficient \
+answer. Do not require a fully achieved, confirmed breakthrough \
+before marking answerable=true; describing where things currently \
+stand, including open questions and unresolved claims, is a complete \
+and honest answer to a progress-oriented question, not a reason to \
+refuse it.
+
+Do NOT doubt or discount evidence because its date is more recent \
+than your own training knowledge, or because a specific month/year \
+mentioned in the evidence seems unfamiliar or "too far in the future" \
+to you. The evidence below comes from a live search and can genuinely \
+postdate what you were trained on -- a dated source (e.g. "3.4% as of \
+August 2026") is real, current information, not an invalid or \
+implausible date. Never mark a query unanswerable on the basis that \
+the evidence's own date "can't be current" or "isn't valid" -- that \
+reasoning is about your own knowledge cutoff, not about whether the \
+evidence actually answers the question.
+
 Respond with ONLY a JSON object, no other text:
 {"answerable": true or false, "confidence": a number from 0.0 to 1.0 \
 for how sure you are that the "answerable" value above is correct \
