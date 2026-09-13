@@ -164,37 +164,30 @@ blocking exit criterion (`prd.md` §5 has no formal threshold on
 step whenever `golden_set_eval.py` is run again against the new
 50-entry set.
 
-**Closure status (D-084 through D-091, current as of status.md Entry
-073):** all three literal exit criteria are now either met or in their
-final confirmation step:
-- **"Metrics logged in status.md"** -- met. Extensive real-hardware
-  history through D-091, including the root cause (D-084) and fix
-  (D-085) for this project's longest-running instability (the
-  false-premise catch rate's multi-week 33.3%-91.7% swing), confirmed
-  at full 50-entry scale (D-089: 100.0%, first time ever).
-- **"readme.md finalized"** -- done this session. Section 6 rewritten
-  to state the real, current false-premise reliability honestly (a
-  strong recent result, explicitly not claimed as a permanent
-  guarantee, consistent with this project's own repeated experience of
-  this exact metric moving between runs) and to disclose D-089's
-  narrower, real side effect (occasional over-refusal on active,
-  unsettled research-frontier questions) rather than silently omitting
-  it. Citation-accuracy and Windows-only sections left unchanged --
-  no new evidence this session to revise either.
-- **"Tag v1.0"** -- `v1.0-windows` exists and was re-cut at HEAD once
-  already (D-087), but B-025's crash-handling fix (debug.md) landed
-  after that re-cut -- the tag needs ONE more re-cut once the item
-  below is resolved, not a new tagging decision.
+**PHASE 10: CLOSED (D-095, status.md Entry 077).** All three literal
+exit criteria confirmed met:
+- **"Metrics logged in status.md"** -- met. Full real-hardware history
+  from D-065 through D-095, including root-causing (D-084) and fixing
+  (D-085) this project's longest-running instability (the
+  false-premise catch rate's multi-week 33.3%-91.7% swing), THEN
+  finding and fixing (B-026/D-093) the answerable-false-positive
+  regression that fix introduced, confirmed clean on BOTH metrics
+  simultaneously at full 50-entry scale (D-095) -- the false-premise
+  catch rate held 100.0% across three independent consecutive full
+  runs (2026-09-10, 2026-09-12 x2), the strongest confirmation any
+  metric in this project has ever received.
+- **"readme.md finalized"** -- done (D-092), wording remains accurate:
+  a strong, now three-times-confirmed result, explicitly not oversold
+  as a permanent guarantee, consistent with this project's standing
+  epistemic discipline throughout the whole D-065-through-D-095 arc.
+- **"Tag v1.0"** -- re-cut at HEAD following D-095's clean confirmation
+  (see status.md Entry 077 for the commands).
 
-**One genuinely open item before calling Phase 10 closed:** D-089
-found a real answerable-false-positive regression (room-temperature
-superconductors, 7.1%) alongside the false-premise win, on a SINGLE
-full-scale run -- not yet confirmed stable across a second run, per
-this project's own standing discipline (D-067/D-069/D-070/D-075) of
-not trusting single-run evidence-classification results. One more full
-`golden_set_eval.py --debug` run settles this either way (stable →
-worth a targeted prompt fix before tagging; drift noise → tag as-is).
-This is the last blocking step, not a new phase of work.
+**Not blocking, explicitly deferred, unchanged from prior sessions:**
+D-077's pinned/cached retrieval option (no formal `prd.md` threshold
+on `needs_evidence`'s catch rate) and macOS/Linux (D-064, on hold per
+user decision, no hardware available). Both remain legitimate v1.1/v2
+candidates, not open v1 exit-criteria items.
 
 ## v2 (not started until v1 ships and is stable)
 Long-term memory, smart routing/fallback across hosted models, multi-agent

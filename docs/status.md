@@ -7,6 +7,38 @@
 ---
 
 ## Current state
+- **UPDATE (Entry 077): D-095 -- PHASE 10 CLOSED. v1 confirmed done.**
+  Full `golden_set_eval.py --debug` run: false-premise catch rate
+  100.0% (15/15, THIRD consecutive full-scale run at 100.0%), both
+  subtypes 100.0%; answerable false-positive rate back to 0.0% (both
+  previously-failing queries -- superconductors, inflation -- now
+  correctly answerable, zero new false positives among the other 12
+  answerable queries); off-domain refusal 100.0%; low-evidence 0/8.
+  This is the first time in the entire D-065-through-D-095 investigation
+  that both tracked metrics have been simultaneously clean on a
+  full-scale run. All three Phase 10 exit criteria (`phases.md`) now
+  formally met: metrics logged, `readme.md` finalized (D-092), tag
+  ready to re-cut. **`v1.0-windows` should be re-cut at HEAD now** --
+  same commands as the prior re-cut (D-087):
+  ```
+  git tag -d v1.0-windows
+  git tag -a v1.0-windows -m "v1.0 Windows release -- through D-095, both tracked golden-set metrics confirmed clean at full scale"
+  git push origin :refs/tags/v1.0-windows
+  git push origin v1.0-windows
+  ```
+  Once re-cut, v1 is genuinely, fully closed. D-077's pinned/cached
+  retrieval and macOS/Linux (D-064, on hold) remain open but are
+  explicitly non-blocking v1.1/v2-track items, not v1 exit criteria.
+- **UPDATE (Entry 076): D-094 -- B-026's fix confirmed working on both
+  targets.** `watchlist_eval.py --debug`: superconductors and
+  inflation both now correctly `answerable=True`, with reasons that
+  explicitly reflect the fix's intent (progress accepted without a
+  confirmed breakthrough; August 2026 evidence accepted as current,
+  not doubted). Both false-premise controls and the off-domain control
+  unaffected. **Still not sufficient to re-cut the tag** -- this is a
+  6-query subset; the full 50-entry run is the actual remaining gate,
+  since this prompt change touches all 14 `answerable` queries, not
+  just the 2 that were failing.
 - **UPDATE (Entry 075): D-093/B-026 -- second full run resolved D-092's
   branch precisely: false-premise fix CONFIRMED STABLE (100.0% x2
   consecutive full runs), answerable-false-positive regression

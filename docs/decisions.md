@@ -4829,5 +4829,111 @@ the 14 total `answerable` queries. Only once both come back clean
 should `v1.0-windows` be re-cut at HEAD -- that would be the actual,
 final close of Phase 10 and v1.
 
+### D-094 — B-026's fix confirmed working on both targets via watchlist_eval.py; full-scale confirmation still required before any tag decision
+
+**Context:** user ran `watchlist_eval.py --debug` against the refreshed
+6-entry watchlist, immediately after D-093's prompt fix.
+
+**Both target regressions resolved, cleanly:**
+- Superconductors: `answerable=True, confidence=0.95`, reason
+  explicitly states "no confirmed room-temperature superconductor has
+  been achieved" while correctly treating the described research
+  progress (AI-powered search methods, ambient-pressure high-temp
+  results) as a sufficient answer to a progress-oriented question --
+  exactly the distinction the new criterion-2 scope was written to
+  draw.
+- Inflation: `answerable=True, confidence=0.95`, reason explicitly
+  accepts the August 2026 figure ("even though the next update is
+  scheduled for September") as current, valid evidence rather than
+  doubting its date -- the exact failure phrase from D-093's fix
+  ("isn't valid"/"can't be current") does not reappear.
+
+**Controls unaffected:** both false-premise queries (Eiffel, JWST)
+still caught correctly (`domain_gate_refused` and `needs_evidence`
+subsets both 100.0%, n=1 each on this small subset); off-domain
+control still refused correctly. No sign this prompt change disturbed
+either mechanism it wasn't meant to touch.
+
+**Explicitly not yet sufficient for a tag decision.** This is a
+6-query subset, 3 of which are `answerable` -- it cannot rule out a
+new false-positive appearing among the other 11 `answerable` queries
+in the full golden set that this watchlist doesn't cover, and it
+cannot re-confirm the false-premise metric at the full n=15 scale that
+actually matters for `eval_log.md`'s tracked trend. Per D-093's own
+stated next step and this project's standing discipline around
+single/partial-run evidence, the full `golden_set_eval.py --debug` run
+remains the actual gate before re-cutting `v1.0-windows`.
+
+**Files touched:** none -- confirmation entry only.
+**Verification:** N/A, no code changed.
+**Not yet done:** the full 50-entry run.
+**Next action for next session:** run `python tests/eval/golden_set_
+eval.py --debug`. If false-premise holds at/near 100.0% and the
+answerable false-positive rate returns to 0.0% (or at least shows no
+new, different failures), re-cut `v1.0-windows` at HEAD -- that is the
+actual, final close of Phase 10 and v1. If a new answerable
+false-positive appears elsewhere, that would mean D-093's fix
+introduced a different regression while resolving the first two, and
+needs its own investigation before tagging.
+
+### D-095 — B-026/D-093 CONFIRMED at full scale. False-premise catch rate: 100.0% for a THIRD consecutive full run. Answerable false-positive rate: back to 0.0%. Phase 10's last blocking item is resolved
+
+**Context:** the full `golden_set_eval.py --debug` run D-094 asked for
+as the actual gate before any tag decision.
+
+**Result, unambiguous:**
+- Off-domain refusal: 100.0% (prd.md §5's threshold, unaffected as
+  expected).
+- False-premise catch rate: **100.0% (15/15)**, both subtypes
+  (`domain_gate_refused` n=5, `needs_evidence` n=10) at 100.0%. This is
+  the THIRD consecutive full-scale run at 100.0% (2026-09-10,
+  2026-09-12, and this run) -- D-085's fix is now confirmed stable
+  across more independent full-scale observations than any other
+  metric in this project's history has ever received before being
+  trusted.
+- Answerable false-positive rate: **0.0%**, both previously-failing
+  queries (superconductors, inflation) now correctly `answerable=True`
+  with reasoning that explicitly reflects B-026/D-093's fix intent --
+  superconductors: "no confirmed room-temperature superconductor has
+  been achieved" but "shows significant developments and scientific
+  efforts, which directly address the question"; inflation: accepts
+  the August 2026 figure directly, no date-doubting language anywhere
+  in the reason text. Zero new false positives appeared among the
+  other 12 `answerable` queries this fix could have newly broken.
+- Low-evidence review candidates: 0/8, unaffected.
+
+**This closes the last genuinely open item from D-092's Phase 10
+closure checklist.** Per D-093's own explicit branching plan ("only
+once both come back clean should v1.0-windows be re-cut"), this is
+the actual, final confirmation -- not a partial or subset result like
+every intermediate step in this arc (D-084's original transcript,
+D-087's watchlist-only run, D-089's single full run, D-094's
+watchlist-only recheck). This is the first time in the entire
+D-084-through-D-095 sequence that BOTH the false-premise metric and
+the answerable false-positive metric have been simultaneously clean
+on a full-scale run.
+
+**Phase 10 exit criteria, final status (see phases.md):**
+1. Metrics logged in status.md -- met, extensively.
+2. `readme.md` finalized -- met (D-092), and its hedged wording ("a
+   strong recent result... not a permanent guarantee") remains
+   appropriate even now -- three good runs is strong evidence, not
+   proof of permanence, consistent with this project's own standing
+   epistemic discipline throughout this entire investigation.
+3. Tag v1.0 -- ready to re-cut at HEAD. This entry is the signal to do
+   so.
+
+**Files touched:** none -- confirmation entry only.
+**Verification:** N/A, no code changed. `docs/eval_log.md` carries
+this run's real numbers.
+**Not yet done:** the tag re-cut itself -- a git operation on the
+user's actual repo, not something performed from this analysis.
+**Next action for next session:** re-cut `v1.0-windows` at current
+HEAD (same commands as D-087's prior re-cut). Once done, Phase 10 and
+v1 are genuinely, fully closed -- no further blocking items remain
+identified as of this entry. D-077's pinned/cached retrieval option
+and macOS/Linux (D-064, on hold) remain open but explicitly
+non-blocking, documented v1.1/v2-track items, not v1 exit criteria.
+
 ---
 **Return to `/context.md` for next steps.**
